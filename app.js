@@ -1,706 +1,1445 @@
 /* =========================================================
-   설천 바이애슬론 자세분석 PRO
+   설천 BIATHLON PERFORMANCE CENTER PRO
    app.js
-   ---------------------------------------------------------
-   실제 분석 엔진
-   - 영상 업로드
-   - 영상 재생 / 정지
-   - 프레임 이동
-   - 슬로모션
-   - 측면 / 정면 / 후면
+
+   포함:
    - MediaPipe Pose
-   - 관절각 계산
-   - 신체중심 계산
-   - 중심 궤적
-   - 기준선
-   - 스켈레톤
+   - 사람 추적 보정
+   - 스켈레톤 표시
    - 스키 분석
    - 롤러스키 분석
-   - 사격 분석
-   - 격발 타임라인
-   - 5발 분석
-   - 핵심 프레임
-   - 자동 점수
+   - 사격 자세분석
+   - 관절각 계산
+   - 중심 궤적
+   - 실시간 그래프
+   - 점수 계산
    - 분석 기록 저장
+   - 비교분석 데이터 생성
+
+   주의:
+   사격에서 총기/총구/격발 시점을 자동 판정하지 않음.
 ========================================================= */
 
 
 /* =========================================================
-   01. GLOBAL ANALYSIS STATE
+   APP
 ========================================================= */
 
-const AnalysisState = {
+const App = {
 
-  ski: {
-    video: null,
-    canvas: null,
-    ctx: null,
+  sessions: {},
 
-    pose: null,
-    running: false,
-    processing: false,
+  charts: {},
 
-    camera: "side",
 
-    duration: 0,
-    currentTime: 0,
+  /* =======================================================
+     01. POSE ENGINE
+  ======================================================= */
 
-    trajectory: [],
-    angleHistory: [],
+  poseFactory(handler) {
 
-    keyFrames: [],
+    if (
+      typeof Pose === "undefined"
+    ) {
 
-    score: null,
+      console.error(
+        "MediaPipe Pose가 로드되지 않았습니다."
+      );
 
-    lastLandmarks: null,
+      return null;
 
-    frameCount: 0
+    }
+
+
+    const pose =
+      new Pose({
+
+        locateFile: file =>
+          `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+
+      });
+
+
+    pose.setOptions({
+
+      /*
+       * 정확도 우선
+       */
+
+      modelComplexity: 2,
+
+      /*
+       * 프레임 간 관절 흔들림 감소
+       */
+
+      smoothLandmarks: true,
+
+      /*
+       * 필요하지 않은 segmentation 제거
+       */
+
+      enableSegmentation: false,
+
+      smoothSegmentation: false,
+
+      /*
+       * 사람 검출 기준
+       */
+
+      minDetectionConfidence: 0.65,
+
+      /*
+       * 추적 유지 기준
+       */
+
+      minTrackingConfidence: 0.70
+
+    });
+
+
+    pose.onResults(
+      handler
+    );
+
+
+    return pose;
+
   },
 
 
-  roller: {
-    video: null,
-    canvas: null,
-    ctx: null,
-
-    pose: null,
-    running: false,
-    processing: false,
-
-    camera: "side",
-
-    duration: 0,
-    currentTime: 0,
-
-    trajectory: [],
-    angleHistory: [],
-
-    cycleHistory: [],
-    keyFrames: [],
-
-    score: null,
-
-    lastLandmarks: null,
-
-    frameCount: 0
-  },
-
-
-  shooting: {
-    video: null,
-    canvas: null,
-    ctx: null,
-
-    pose: null,
-    running: false,
-    processing: false,
-
-    camera: "side",
-    mode: "prone",
-
-    duration: 0,
-    currentTime: 0,
-
-    trajectory: [],
-    angleHistory: [],
-
-    triggerData: [],
-    shots: [],
-
-    keyFrames: [],
-
-    score: null,
-
-    lastLandmarks: null,
-
-    frameCount: 0
-  }
-
-};
-
-
-/* =========================================================
-   02. CONSTANTS
-========================================================= */
-
-const POSE_CONNECTIONS = [
-
-  [11, 12],
-
-  [11, 13],
-  [13, 15],
-
-  [12, 14],
-  [14, 16],
-
-  [11, 23],
-  [12, 24],
-
-  [23, 24],
-
-  [23, 25],
-  [25, 27],
-
-  [24, 26],
-  [26, 28],
-
-  [27, 31],
-  [28, 32],
-
-  [15, 17],
-  [15, 19],
-  [15, 21],
-
-  [16, 18],
-  [16, 20],
-  [16, 22]
-
-];
-
-
-/* =========================================================
-   03. UTILITY
-========================================================= */
-
-function clamp(
-  value,
-  min,
-  max
-) {
-
-  return Math.max(
-    min,
-    Math.min(max, value)
-  );
-
-}
-
-
-function average(
-  values
-) {
-
-  const valid =
-    values.filter(
-      value =>
-        Number.isFinite(value)
-    );
-
-
-  if (!valid.length) {
-    return 0;
-  }
-
-
-  return valid.reduce(
-    (sum, value) =>
-      sum + value,
-    0
-  ) / valid.length;
-
-}
-
-
-function distance(
-  a,
-  b
-) {
-
-  if (!a || !b) {
-    return 0;
-  }
-
-
-  return Math.sqrt(
-    Math.pow(a.x - b.x, 2) +
-    Math.pow(a.y - b.y, 2)
-  );
-
-}
-
-
-function midpoint(
-  a,
-  b
-) {
-
-  if (!a || !b) {
-    return null;
-  }
-
-
-  return {
-
-    x: (a.x + b.x) / 2,
-
-    y: (a.y + b.y) / 2,
-
-    z:
-      ((a.z || 0) +
-       (b.z || 0)) / 2
-
-  };
-
-}
-
-
-function formatTime(
-  seconds
-) {
-
-  if (!Number.isFinite(seconds)) {
-    return "00:00";
-  }
-
-
-  const minutes =
-    Math.floor(seconds / 60);
-
-  const secs =
-    Math.floor(seconds % 60);
-
-
-  return (
-    String(minutes).padStart(2, "0") +
-    ":" +
-    String(secs).padStart(2, "0")
-  );
-
-}
-
-
-/* =========================================================
-   04. LANDMARK
-========================================================= */
-
-function landmark(
-  landmarks,
-  index
-) {
-
-  if (
-    !landmarks ||
-    !landmarks[index]
+  /* =======================================================
+     02. SESSION 생성
+  ======================================================= */
+
+  create(
+    type,
+    ids
   ) {
 
-    return null;
-  }
+    const video =
+      document.getElementById(
+        ids.video
+      );
 
 
-  return landmarks[index];
-}
+    const canvas =
+      document.getElementById(
+        ids.canvas
+      );
 
 
-/* =========================================================
-   05. ANGLE
-========================================================= */
+    if (
+      !video ||
+      !canvas
+    ) {
 
-function calculateAngle(
-  a,
-  b,
-  c
-) {
+      console.warn(
+        `${type} 요소를 찾지 못했습니다.`
+      );
 
-  if (!a || !b || !c) {
-    return null;
-  }
+      return;
 
-
-  const BA = {
-
-    x: a.x - b.x,
-    y: a.y - b.y
-
-  };
+    }
 
 
-  const BC = {
-
-    x: c.x - b.x,
-    y: c.y - b.y
-
-  };
+    const ctx =
+      canvas.getContext(
+        "2d"
+      );
 
 
-  const dot =
-    BA.x * BC.x +
-    BA.y * BC.y;
+    const session = {
+
+      type,
+
+      video,
+
+      canvas,
+
+      ctx,
+
+      pose: null,
+
+      running: false,
+
+      processing: false,
+
+      duration: 0,
+
+      file: "",
+
+      frameCount: 0,
+
+      /*
+       * 중심 궤적
+       */
+
+      trajectory: [],
+
+      /*
+       * 관절각 기록
+       */
+
+      angles: [],
+
+      /*
+       * 마지막 정상 인식
+       */
+
+      lastGood: null,
+
+      /*
+       * 마지막 선수 중심
+       */
+
+      lastCenter: null,
+
+      /*
+       * 잘못된 인식 연속 횟수
+       */
+
+      loss: 0,
+
+      /*
+       * 마지막 정상 프레임 시간
+       */
+
+      lastGoodTime: 0,
+
+      /*
+       * 영상 FPS 추정
+       */
+
+      fps: 30
+
+    };
 
 
-  const magBA =
-    Math.sqrt(
-      BA.x * BA.x +
-      BA.y * BA.y
+    session.pose =
+      this.poseFactory(
+        result =>
+          this.results(
+            session,
+            result
+          )
+      );
+
+
+    this.sessions[type] =
+      session;
+
+
+    /*
+     * 영상 선택
+     */
+
+    const input =
+      document.getElementById(
+        ids.input
+      );
+
+
+    const upload =
+      document.getElementById(
+        ids.upload
+      );
+
+
+    upload?.addEventListener(
+      "click",
+      () => {
+
+        input?.click();
+
+      }
     );
 
 
-  const magBC =
-    Math.sqrt(
-      BC.x * BC.x +
-      BC.y * BC.y
-    );
+    input?.addEventListener(
+      "change",
+      () => {
+
+        const file =
+          input.files?.[0];
 
 
-  if (
-    magBA === 0 ||
-    magBC === 0
-  ) {
-
-    return null;
-  }
-
-
-  const cos =
-    clamp(
-      dot / (magBA * magBC),
-      -1,
-      1
-    );
-
-
-  return (
-    Math.acos(cos) *
-    180 /
-    Math.PI
-  );
-
-}
-
-
-/* =========================================================
-   06. ANGLE DATA
-========================================================= */
-
-function calculatePoseAngles(
-  landmarks
-) {
-
-  const leftShoulder =
-    landmark(landmarks, 11);
-
-  const rightShoulder =
-    landmark(landmarks, 12);
-
-  const leftElbow =
-    landmark(landmarks, 13);
-
-  const rightElbow =
-    landmark(landmarks, 14);
-
-  const leftHip =
-    landmark(landmarks, 23);
-
-  const rightHip =
-    landmark(landmarks, 24);
-
-  const leftKnee =
-    landmark(landmarks, 25);
-
-  const rightKnee =
-    landmark(landmarks, 26);
-
-  const leftAnkle =
-    landmark(landmarks, 27);
-
-  const rightAnkle =
-    landmark(landmarks, 28);
-
-
-  return {
-
-    leftKnee:
-      calculateAngle(
-        leftHip,
-        leftKnee,
-        leftAnkle
-      ),
-
-    rightKnee:
-      calculateAngle(
-        rightHip,
-        rightKnee,
-        rightAnkle
-      ),
-
-    leftHip:
-      calculateAngle(
-        leftShoulder,
-        leftHip,
-        leftKnee
-      ),
-
-    rightHip:
-      calculateAngle(
-        rightShoulder,
-        rightHip,
-        rightKnee
-      ),
-
-    leftElbow:
-      calculateAngle(
-        leftShoulder,
-        leftElbow,
-        landmark(
-          landmarks,
-          15
-        )
-      ),
-
-    rightElbow:
-      calculateAngle(
-        rightShoulder,
-        rightElbow,
-        landmark(
-          landmarks,
-          16
-        )
-      ),
-
-    trunk:
-      calculateAngle(
-        midpoint(
-          leftShoulder,
-          rightShoulder
-        ),
-        midpoint(
-          leftHip,
-          rightHip
-        ),
-        {
-          x:
-            midpoint(
-              leftHip,
-              rightHip
-            )?.x,
-
-          y:
-            (
-              midpoint(
-                leftHip,
-                rightHip
-              )?.y || 0
-            ) + 1
+        if (!file) {
+          return;
         }
-      )
-
-  };
-
-}
 
 
-/* =========================================================
-   07. CENTER OF MASS APPROXIMATION
-========================================================= */
+        if (
+          !file.type.startsWith(
+            "video/"
+          )
+        ) {
 
-function calculateCenter(
-  landmarks
-) {
+          UI.toast(
+            "영상 파일을 선택해주세요."
+          );
 
-  const points = [
+          return;
 
-    landmark(landmarks, 11),
-    landmark(landmarks, 12),
-
-    landmark(landmarks, 23),
-    landmark(landmarks, 24),
-
-    landmark(landmarks, 25),
-    landmark(landmarks, 26)
-
-  ].filter(Boolean);
+        }
 
 
-  if (!points.length) {
-    return null;
-  }
+        session.file =
+          file.name;
 
 
-  return {
-
-    x: average(
-      points.map(
-        point => point.x
-      )
-    ),
-
-    y: average(
-      points.map(
-        point => point.y
-      )
-    )
-
-  };
-
-}
+        const oldUrl =
+          video.dataset.objectUrl;
 
 
-/* =========================================================
-   08. POSE VISIBILITY
-========================================================= */
+        if (oldUrl) {
 
-function hasUsablePose(
-  landmarks
-) {
+          URL.revokeObjectURL(
+            oldUrl
+          );
 
-  if (
-    !landmarks ||
-    landmarks.length < 29
-  ) {
-
-    return false;
-  }
+        }
 
 
-  const important = [
-
-    11,
-    12,
-    23,
-    24,
-    25,
-    26,
-    27,
-    28
-
-  ];
+        const url =
+          URL.createObjectURL(
+            file
+          );
 
 
-  const visible =
-    important.filter(
-      index =>
-        landmarks[index] &&
-        (
-          landmarks[index]
-            .visibility === undefined ||
-          landmarks[index]
-            .visibility > 0.45
+        video.dataset.objectUrl =
+          url;
+
+
+        video.src =
+          url;
+
+
+        video.load();
+
+
+        video.addEventListener(
+          "loadedmetadata",
+          () => {
+
+            session.duration =
+              video.duration || 0;
+
+
+            this.resize(
+              session
+            );
+
+
+            const empty =
+              document.getElementById(
+                `${type}Empty`
+              );
+
+
+            if (empty) {
+
+              empty.style.display =
+                "none";
+
+            }
+
+
+            /*
+             * 새 영상이면
+             * 이전 분석 데이터를 초기화
+             */
+
+            session.trajectory =
+              [];
+
+            session.angles =
+              [];
+
+            session.lastGood =
+              null;
+
+            session.lastCenter =
+              null;
+
+            session.loss =
+              0;
+
+            session.frameCount =
+              0;
+
+
+            this.clearCanvas(
+              session
+            );
+
+
+            UI.toast(
+              "영상이 준비되었습니다."
+            );
+
+          },
+          {
+            once: true
+          }
+        );
+
+      }
+    );
+
+
+    /*
+     * 재생 / 일시정지
+     */
+
+    document
+      .getElementById(ids.play)
+      ?.addEventListener(
+        "click",
+        () => {
+
+          if (!video.src) {
+
+            UI.toast(
+              "먼저 영상을 선택하세요."
+            );
+
+            return;
+
+          }
+
+
+          if (
+            video.paused
+          ) {
+
+            video.play();
+
+          } else {
+
+            video.pause();
+
+          }
+
+        }
+      );
+
+
+    /*
+     * 이전 프레임
+     */
+
+    document
+      .getElementById(ids.prev)
+      ?.addEventListener(
+        "click",
+        () => {
+
+          this.step(
+            session,
+            -1
+          );
+
+        }
+      );
+
+
+    /*
+     * 다음 프레임
+     */
+
+    document
+      .getElementById(ids.next)
+      ?.addEventListener(
+        "click",
+        () => {
+
+          this.step(
+            session,
+            1
+          );
+
+        }
+      );
+
+
+    /*
+     * 슬로모션
+     */
+
+    document
+      .getElementById(ids.slow)
+      ?.addEventListener(
+        "click",
+        () => {
+
+          video.playbackRate =
+            type === "shooting"
+              ? 0.25
+              : 0.5;
+
+          UI.toast(
+            `재생속도 ${
+              video.playbackRate
+            }×`
+          );
+
+        }
+      );
+
+
+    /*
+     * 일반속도
+     */
+
+    document
+      .getElementById(ids.normal)
+      ?.addEventListener(
+        "click",
+        () => {
+
+          video.playbackRate =
+            1;
+
+        }
+      );
+
+
+    /*
+     * 분석 시작
+     */
+
+    document
+      .getElementById(ids.start)
+      ?.addEventListener(
+        "click",
+        () => {
+
+          this.start(
+            session
+          );
+
+        }
+      );
+
+
+    /*
+     * 분석 종료
+     */
+
+    document
+      .getElementById(ids.stop)
+      ?.addEventListener(
+        "click",
+        () => {
+
+          this.stop(
+            session
+          );
+
+        }
+      );
+
+
+    /*
+     * Seek bar
+     */
+
+    const seek =
+      document.getElementById(
+        ids.seek
+      );
+
+
+    video.addEventListener(
+      "timeupdate",
+      () => {
+
+        if (
+          seek &&
+          session.duration > 0
+        ) {
+
+          seek.value =
+            (
+              video.currentTime /
+              session.duration
+            ) * 100;
+
+        }
+
+      }
+    );
+
+
+    seek?.addEventListener(
+      "input",
+      event => {
+
+        if (
+          session.duration <= 0
+        ) {
+
+          return;
+
+        }
+
+
+        video.currentTime =
+          Number(
+            event.target.value
+          ) /
+          100 *
+          session.duration;
+
+      }
+    );
+
+
+    /*
+     * 영상이 끝났을 때
+     */
+
+    video.addEventListener(
+      "ended",
+      () => {
+
+        session.running =
+          false;
+
+      }
+    );
+
+  },
+
+
+  /* =======================================================
+     03. CANVAS SIZE
+  ======================================================= */
+
+  resize(session) {
+
+    if (
+      !session ||
+      !session.video ||
+      !session.canvas
+    ) {
+
+      return;
+
+    }
+
+
+    const video =
+      session.video;
+
+
+    if (
+      !video.videoWidth ||
+      !video.videoHeight
+    ) {
+
+      return;
+
+    }
+
+
+    if (
+      session.canvas.width !==
+      video.videoWidth
+    ) {
+
+      session.canvas.width =
+        video.videoWidth;
+
+    }
+
+
+    if (
+      session.canvas.height !==
+      video.videoHeight
+    ) {
+
+      session.canvas.height =
+        video.videoHeight;
+
+    }
+
+  },
+
+
+  /* =======================================================
+     04. CLEAR CANVAS
+  ======================================================= */
+
+  clearCanvas(session) {
+
+    if (!session?.ctx) {
+      return;
+    }
+
+
+    session.ctx.clearRect(
+      0,
+      0,
+      session.canvas.width,
+      session.canvas.height
+    );
+
+  },
+
+
+  /* =======================================================
+     05. START
+  ======================================================= */
+
+  start(session) {
+
+    if (
+      !session.video.src
+    ) {
+
+      UI.toast(
+        "먼저 영상을 선택하세요."
+      );
+
+      return;
+
+    }
+
+
+    if (!session.pose) {
+
+      UI.toast(
+        "자세분석 엔진을 불러오는 중입니다."
+      );
+
+      return;
+
+    }
+
+
+    session.running =
+      true;
+
+
+    session.video
+      .play()
+      .catch(
+        () => {}
+      );
+
+
+    this.loop(
+      session
+    );
+
+
+    UI.toast(
+      `${this.typeName(session.type)} 자세분석 시작`
+    );
+
+  },
+
+
+  /* =======================================================
+     06. ANALYSIS LOOP
+  ======================================================= */
+
+  async loop(session) {
+
+    if (
+      !session.running
+    ) {
+
+      return;
+
+    }
+
+
+    if (
+      !session.processing &&
+      session.video.readyState >= 2 &&
+      !session.video.ended
+    ) {
+
+      session.processing =
+        true;
+
+
+      try {
+
+        await session.pose.send({
+
+          image:
+            session.video
+
+        });
+
+      } catch (error) {
+
+        console.warn(
+          "Pose 분석 오류:",
+          error
+        );
+
+      }
+
+
+      session.processing =
+        false;
+
+    }
+
+
+    requestAnimationFrame(
+      () =>
+        this.loop(
+          session
         )
     );
 
-
-  return visible.length >= 6;
-
-}
+  },
 
 
-/* =========================================================
-   09. DRAW POSE
-========================================================= */
+  /* =======================================================
+     07. MEDIAPIPE RESULTS
+  ======================================================= */
 
-function drawPose(
-  ctx,
-  landmarks,
-  width,
-  height,
-  options = {}
-) {
+  results(
+    session,
+    result
+  ) {
 
-  if (!ctx || !landmarks) {
-    return;
-  }
+    if (
+      !result ||
+      !result.poseLandmarks
+    ) {
 
+      return;
 
-  const showSkeleton =
-    options.skeleton !== false;
+    }
 
 
-  const showAngles =
-    options.angles !== false;
+    const landmarks =
+      result.poseLandmarks;
 
 
-  const showCenter =
-    options.center !== false;
+    /*
+     * 사람 인식 품질 확인
+     */
+
+    if (
+      !this.usable(
+        landmarks
+      )
+    ) {
+
+      session.loss++;
 
 
-  const showBaseline =
-    options.baseline !== false;
+      /*
+       * 짧은 인식 끊김에서는
+       * 마지막 정상 자세 유지
+       */
+
+      if (
+        session.lastGood &&
+        session.loss < 8
+      ) {
+
+        this.draw(
+          session,
+          session.lastGood,
+          session.lastCenter
+        );
+
+      }
 
 
-  const showTrajectory =
-    options.trajectory !== false;
+      return;
+
+    }
 
 
-  ctx.clearRect(
-    0,
-    0,
-    width,
-    height
-  );
+    const center =
+      this.center(
+        landmarks
+      );
 
 
-  /* -------------------------------------------------------
-     기준선
-  ------------------------------------------------------- */
-
-  if (showBaseline) {
-
-    ctx.save();
-
-    ctx.strokeStyle =
-      "rgba(155,189,206,0.65)";
-
-    ctx.lineWidth = 1;
-
-    ctx.setLineDash([
-      7,
-      7
-    ]);
+    if (!center) {
+      return;
+    }
 
 
-    ctx.beginPath();
+    /*
+     * 갑작스러운 위치 이동 제거
+     *
+     * MediaPipe가 다른 위치를
+     * 잘못 잡는 경우를 방지
+     */
 
-    ctx.moveTo(
-      width / 2,
-      0
+    if (
+      session.lastCenter
+    ) {
+
+      const movement =
+        this.dist(
+          center,
+          session.lastCenter
+        );
+
+
+      /*
+       * 화면 대비 지나치게 큰 이동
+       */
+
+      if (
+        movement > 0.16
+      ) {
+
+        session.loss++;
+
+
+        /*
+         * 일시적 오인식은 무시
+         */
+
+        if (
+          session.loss < 4
+        ) {
+
+          if (
+            session.lastGood
+          ) {
+
+            this.draw(
+              session,
+              session.lastGood,
+              session.lastCenter
+            );
+
+          }
+
+
+          return;
+
+        }
+
+      }
+
+    }
+
+
+    /*
+     * 정상 인식
+     */
+
+    session.loss =
+      0;
+
+
+    session.lastCenter =
+      center;
+
+
+    session.lastGood =
+      landmarks.map(
+        point => ({
+          x: point.x,
+          y: point.y,
+          z: point.z,
+          visibility:
+            point.visibility
+        })
+      );
+
+
+    session.lastGoodTime =
+      session.video.currentTime;
+
+
+    session.frameCount++;
+
+
+    /*
+     * 관절각
+     */
+
+    const angles =
+      this.angles(
+        landmarks
+      );
+
+
+    /*
+     * 시간
+     */
+
+    const time =
+      session.video.currentTime;
+
+
+    /*
+     * 중심 궤적 저장
+     */
+
+    session.trajectory.push({
+
+      x: center.x,
+
+      y: center.y,
+
+      t: time
+
+    });
+
+
+    /*
+     * 최대 데이터 개수 제한
+     */
+
+    if (
+      session.trajectory.length >
+      600
+    ) {
+
+      session.trajectory.shift();
+
+    }
+
+
+    /*
+     * 관절각 저장
+     */
+
+    session.angles.push({
+
+      time,
+
+      ...angles
+
+    });
+
+
+    if (
+      session.angles.length >
+      600
+    ) {
+
+      session.angles.shift();
+
+    }
+
+
+    /*
+     * 화면 표시
+     */
+
+    this.draw(
+      session,
+      landmarks,
+      center
     );
 
-    ctx.lineTo(
-      width / 2,
+
+    /*
+     * 실시간 수치
+
+     */
+
+    this.metricsUI(
+      session,
+      angles
+    );
+
+
+    /*
+     * 그래프
+
+     */
+
+    this.chart(
+      session
+    );
+
+  },
+
+
+  /* =======================================================
+     08. USABLE POSE
+  ======================================================= */
+
+  usable(landmarks) {
+
+    /*
+     * 주요 관절
+     */
+
+    const important = [
+
+      11, // left shoulder
+      12, // right shoulder
+
+      23, // left hip
+      24, // right hip
+
+      25, // left knee
+      26, // right knee
+
+      27, // left ankle
+      28  // right ankle
+
+    ];
+
+
+    let visible =
+      0;
+
+
+    important.forEach(
+      index => {
+
+        const point =
+          landmarks[index];
+
+
+        if (!point) {
+          return;
+        }
+
+
+        const visibility =
+          point.visibility ===
+          undefined
+            ? 1
+            : point.visibility;
+
+
+        if (
+          visibility >= 0.45
+        ) {
+
+          visible++;
+
+        }
+
+      }
+    );
+
+
+    return visible >= 6;
+
+  },
+
+
+  /* =======================================================
+     09. CENTER
+  ======================================================= */
+
+  center(landmarks) {
+
+    const indexes = [
+
+      11,
+      12,
+      23,
+      24
+
+    ];
+
+
+    const points =
+      indexes
+        .map(
+          index =>
+            landmarks[index]
+        )
+        .filter(Boolean);
+
+
+    if (
+      points.length < 2
+    ) {
+
+      return null;
+
+    }
+
+
+    let x =
+      0;
+
+    let y =
+      0;
+
+
+    points.forEach(
+      point => {
+
+        x += point.x;
+
+        y += point.y;
+
+      }
+    );
+
+
+    return {
+
+      x:
+        x /
+        points.length,
+
+      y:
+        y /
+        points.length
+
+    };
+
+  },
+
+
+  /* =======================================================
+     10. DISTANCE
+  ======================================================= */
+
+  dist(a, b) {
+
+    if (
+      !a ||
+      !b
+    ) {
+
+      return Infinity;
+
+    }
+
+
+    return Math.hypot(
+      a.x - b.x,
+      a.y - b.y
+    );
+
+  },
+
+
+  /* =======================================================
+     11. ANGLE
+  ======================================================= */
+
+  angle(
+    a,
+    b,
+    c
+  ) {
+
+    if (
+      !a ||
+      !b ||
+      !c
+    ) {
+
+      return null;
+
+    }
+
+
+    const ab = {
+
+      x:
+        a.x - b.x,
+
+      y:
+        a.y - b.y
+
+    };
+
+
+    const cb = {
+
+      x:
+        c.x - b.x,
+
+      y:
+        c.y - b.y
+
+    };
+
+
+    const dot =
+      ab.x * cb.x +
+      ab.y * cb.y;
+
+
+    const magnitude =
+      Math.hypot(
+        ab.x,
+        ab.y
+      ) *
+      Math.hypot(
+        cb.x,
+        cb.y
+      );
+
+
+    if (
+      magnitude === 0
+    ) {
+
+      return null;
+
+    }
+
+
+    const cosine =
+      Math.max(
+        -1,
+        Math.min(
+          1,
+          dot / magnitude
+        )
+      );
+
+
+    return (
+      Math.acos(
+        cosine
+      ) *
+      180 /
+      Math.PI
+    );
+
+  },
+
+
+  /* =======================================================
+     12. JOINT ANGLES
+  ======================================================= */
+
+  angles(landmarks) {
+
+    return {
+
+      leftKnee:
+        this.angle(
+          landmarks[23],
+          landmarks[25],
+          landmarks[27]
+        ),
+
+      rightKnee:
+        this.angle(
+          landmarks[24],
+          landmarks[26],
+          landmarks[28]
+        ),
+
+      leftHip:
+        this.angle(
+          landmarks[11],
+          landmarks[23],
+          landmarks[25]
+        ),
+
+      rightHip:
+        this.angle(
+          landmarks[12],
+          landmarks[24],
+          landmarks[26]
+        ),
+
+      leftElbow:
+        this.angle(
+          landmarks[11],
+          landmarks[13],
+          landmarks[15]
+        ),
+
+      rightElbow:
+        this.angle(
+          landmarks[12],
+          landmarks[14],
+          landmarks[16]
+        )
+
+    };
+
+  },
+
+
+  /* =======================================================
+     13. DRAW SKELETON
+  ======================================================= */
+
+  draw(
+    session,
+    landmarks,
+    center
+  ) {
+
+    if (
+      !session ||
+      !landmarks
+    ) {
+
+      return;
+
+    }
+
+
+    this.resize(
+      session
+    );
+
+
+    const ctx =
+      session.ctx;
+
+
+    const width =
+      session.canvas.width;
+
+
+    const height =
+      session.canvas.height;
+
+
+    ctx.clearRect(
+      0,
+      0,
+      width,
       height
     );
 
-    ctx.stroke();
+
+    /*
+     * 중심 궤적
+     */
+
+    if (
+      session.trajectory.length > 1
+    ) {
+
+      ctx.beginPath();
 
 
-    ctx.restore();
-
-  }
-
-
-  /* -------------------------------------------------------
-     궤적
-  ------------------------------------------------------- */
-
-  if (
-    showTrajectory &&
-    Array.isArray(
-      options.trajectory
-    ) &&
-    options.trajectory.length > 1
-  ) {
-
-    ctx.save();
-
-    ctx.strokeStyle =
-      "rgba(130,190,210,0.9)";
-
-    ctx.lineWidth = 3;
-
-    ctx.beginPath();
-
-
-    options.trajectory
-      .forEach(
+      session.trajectory.forEach(
         (point, index) => {
 
           const x =
-            point.x * width;
+            point.x *
+            width;
+
 
           const y =
-            point.y * height;
+            point.y *
+            height;
 
 
-          if (index === 0) {
+          if (
+            index === 0
+          ) {
 
             ctx.moveTo(
               x,
@@ -720,3823 +1459,791 @@ function drawPose(
       );
 
 
-    ctx.stroke();
-
-    ctx.restore();
-
-  }
+      ctx.strokeStyle =
+        "rgba(120,190,210,.75)";
 
 
-  /* -------------------------------------------------------
-     Skeleton
-  ------------------------------------------------------- */
-
-  if (showSkeleton) {
-
-    ctx.save();
-
-    ctx.strokeStyle =
-      "rgba(235,245,249,0.9)";
-
-    ctx.lineWidth = 3;
-
-    ctx.lineCap = "round";
+      ctx.lineWidth =
+        3;
 
 
-    POSE_CONNECTIONS
-      .forEach(
-        connection => {
+      ctx.stroke();
 
-          const a =
-            landmarks[
-              connection[0]
-            ];
-
-          const b =
-            landmarks[
-              connection[1]
-            ];
+    }
 
 
-          if (
-            !a ||
-            !b
-          ) {
+    /*
+     * MediaPipe Pose 연결
+     */
 
-            return;
-          }
+    const connections = [
 
+      [11, 12],
 
-          if (
-            a.visibility !== undefined &&
-            a.visibility < 0.35
-          ) {
+      [11, 13],
+      [13, 15],
 
-            return;
-          }
+      [12, 14],
+      [14, 16],
 
+      [11, 23],
+      [12, 24],
 
-          if (
-            b.visibility !== undefined &&
-            b.visibility < 0.35
-          ) {
+      [23, 24],
 
-            return;
-          }
+      [23, 25],
+      [25, 27],
 
+      [24, 26],
+      [26, 28]
 
-          ctx.beginPath();
-
-          ctx.moveTo(
-            a.x * width,
-            a.y * height
-          );
-
-          ctx.lineTo(
-            b.x * width,
-            b.y * height
-          );
-
-          ctx.stroke();
-
-        }
-      );
+    ];
 
 
-    ctx.fillStyle =
-      "#ffffff";
-
-
-    landmarks
-      .forEach(
-        point => {
-
-          if (
-            point.visibility !== undefined &&
-            point.visibility < 0.35
-          ) {
-
-            return;
-          }
-
-
-          ctx.beginPath();
-
-          ctx.arc(
-            point.x * width,
-            point.y * height,
-            3.2,
-            0,
-            Math.PI * 2
-          );
-
-          ctx.fill();
-
-        }
-      );
-
-
-    ctx.restore();
-
-  }
-
-
-  /* -------------------------------------------------------
-     Center
-  ------------------------------------------------------- */
-
-  if (
-    showCenter &&
-    options.centerPoint
-  ) {
-
-    const x =
-      options.centerPoint.x *
-      width;
-
-    const y =
-      options.centerPoint.y *
-      height;
-
-
-    ctx.save();
-
-    ctx.fillStyle =
-      "#9bbdce";
+    /*
+     * 뼈대
+     */
 
     ctx.strokeStyle =
       "#ffffff";
 
-    ctx.lineWidth = 2;
-
-
-    ctx.beginPath();
-
-    ctx.arc(
-      x,
-      y,
-      7,
-      0,
-      Math.PI * 2
-    );
-
-    ctx.fill();
-
-    ctx.stroke();
-
-
-    ctx.restore();
-
-  }
-
-
-  /* -------------------------------------------------------
-     Angles
-  ------------------------------------------------------- */
-
-  if (
-    showAngles &&
-    options.angles
-  ) {
-
-    drawAngleLabel(
-      ctx,
-      landmarks,
-      23,
-      25,
-      27,
-      options.angles.leftKnee,
-      width,
-      height
-    );
-
-
-    drawAngleLabel(
-      ctx,
-      landmarks,
-      24,
-      26,
-      28,
-      options.angles.rightKnee,
-      width,
-      height
-    );
-
-  }
-
-}
-
-
-/* =========================================================
-   10. ANGLE LABEL
-========================================================= */
-
-function drawAngleLabel(
-  ctx,
-  landmarks,
-  aIndex,
-  bIndex,
-  cIndex,
-  angle,
-  width,
-  height
-) {
-
-  if (
-    !Number.isFinite(angle)
-  ) {
-
-    return;
-  }
-
-
-  const a =
-    landmarks[aIndex];
-
-  const b =
-    landmarks[bIndex];
-
-  const c =
-    landmarks[cIndex];
-
-
-  if (
-    !a ||
-    !b ||
-    !c
-  ) {
-
-    return;
-  }
-
-
-  const x =
-    b.x * width;
-
-  const y =
-    b.y * height;
-
-
-  ctx.save();
-
-  ctx.fillStyle =
-    "rgba(7,16,24,0.78)";
-
-  ctx.font =
-    "bold 11px sans-serif";
-
-
-  const text =
-    `${Math.round(angle)}°`;
-
-
-  ctx.fillText(
-    text,
-    x + 7,
-    y - 7
-  );
-
-
-  ctx.restore();
-
-}
-
-
-/* =========================================================
-   11. OVERLAY SETTINGS
-========================================================= */
-
-function getOverlayOptions() {
-
-  const options = {};
-
-
-  document
-    .querySelectorAll(
-      "[data-overlay]"
-    )
-    .forEach(
-      checkbox => {
-
-        options[
-          checkbox.dataset.overlay
-        ] =
-          checkbox.checked;
-
-      }
-    );
-
-
-  return options;
-}
-
-
-/* =========================================================
-   12. CREATE POSE
-========================================================= */
-
-function createPose(
-  onResults
-) {
-
-  if (
-    typeof Pose ===
-    "undefined"
-  ) {
-
-    console.warn(
-      "MediaPipe Pose가 아직 로드되지 않았습니다."
-    );
-
-    return null;
-  }
-
-
-  const pose =
-    new Pose({
-
-      locateFile:
-        file =>
-          `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
-
-    });
-
-
-  pose.setOptions({
-
-    modelComplexity: 1,
-
-    smoothLandmarks: true,
-
-    enableSegmentation: false,
-
-    smoothSegmentation: false,
-
-    minDetectionConfidence: 0.5,
-
-    minTrackingConfidence: 0.5
-
-  });
-
-
-  pose.onResults(
-    onResults
-  );
-
-
-  return pose;
-}
-
-
-/* =========================================================
-   13. VIDEO ELEMENT
-========================================================= */
-
-function prepareVideo(
-  video,
-  canvas
-) {
-
-  if (!video || !canvas) {
-    return;
-  }
-
-
-  video.controls = false;
-
-  video.playsInline = true;
-
-  video.muted = true;
-
-
-  canvas.width =
-    video.videoWidth ||
-    1280;
-
-  canvas.height =
-    video.videoHeight ||
-    720;
-
-}
-
-
-/* =========================================================
-   14. VIDEO INPUT
-========================================================= */
-
-function loadVideoFile(
-  input,
-  video,
-  placeholder,
-  state
-) {
-
-  if (
-    !input ||
-    !video
-  ) {
-
-    return;
-  }
-
-
-  const file =
-    input.files?.[0];
-
-
-  if (!file) {
-    return;
-  }
-
-
-  const url =
-    URL.createObjectURL(
-      file
-    );
-
-
-  video.src =
-    url;
-
-
-  video.load();
-
-
-  state.videoFileName =
-    file.name;
-
-
-  if (placeholder) {
-
-    placeholder.style.display =
-      "none";
-
-  }
-
-
-  video.addEventListener(
-    "loadedmetadata",
-    () => {
-
-      state.duration =
-        video.duration || 0;
-
-      state.currentTime =
-        0;
-
-
-      prepareVideo(
-        video,
-        state.canvas
+    ctx.lineWidth =
+      Math.max(
+        2,
+        width / 500
       );
 
 
-      updateVideoUI(
-        state,
-        video
-      );
+    connections.forEach(
+      ([a, b]) => {
 
-    },
-    {
-      once: true
-    }
-  );
+        const p1 =
+          landmarks[a];
 
+        const p2 =
+          landmarks[b];
 
-  if (
-    window.BiathlonEvents
-  ) {
-
-    BiathlonEvents.showToast(
-      "영상을 불러왔습니다."
-    );
-
-  }
-
-}
-
-
-/* =========================================================
-   15. VIDEO CONTROLS
-========================================================= */
-
-function toggleVideo(
-  video
-) {
-
-  if (!video) {
-    return;
-  }
-
-
-  if (video.paused) {
-
-    video.play();
-
-  } else {
-
-    video.pause();
-
-  }
-
-}
-
-
-function setVideoSpeed(
-  video,
-  speed
-) {
-
-  if (!video) {
-    return;
-  }
-
-
-  video.playbackRate =
-    speed;
-
-}
-
-
-function stepFrame(
-  video,
-  direction
-) {
-
-  if (
-    !video ||
-    !Number.isFinite(
-      video.duration
-    )
-  ) {
-
-    return;
-  }
-
-
-  video.pause();
-
-
-  const frameTime =
-    1 / 30;
-
-
-  video.currentTime =
-    clamp(
-      video.currentTime +
-      frameTime * direction,
-      0,
-      video.duration
-    );
-
-}
-
-
-/* =========================================================
-   16. VIDEO UI
-========================================================= */
-
-function updateVideoUI(
-  state,
-  video
-) {
-
-  if (!video) {
-    return;
-  }
-
-
-  state.currentTime =
-    video.currentTime;
-
-
-  const seek =
-    getSeekForVideo(
-      video
-    );
-
-
-  if (seek) {
-
-    seek.value =
-      video.duration
-        ? (
-            video.currentTime /
-            video.duration
-          ) * 100
-        : 0;
-
-  }
-
-
-  const current =
-    getCurrentTimeElement(
-      video
-    );
-
-
-  const duration =
-    getDurationElement(
-      video
-    );
-
-
-  if (current) {
-
-    current.textContent =
-      formatTime(
-        video.currentTime
-      );
-
-  }
-
-
-  if (duration) {
-
-    duration.textContent =
-      formatTime(
-        video.duration
-      );
-
-  }
-
-}
-
-
-function getSeekForVideo(
-  video
-) {
-
-  if (
-    video.id ===
-    "analysisVideo"
-  ) {
-
-    return document.getElementById(
-      "videoSeek"
-    );
-
-  }
-
-
-  return null;
-
-}
-
-
-function getCurrentTimeElement(
-  video
-) {
-
-  if (
-    video.id ===
-    "analysisVideo"
-  ) {
-
-    return document.getElementById(
-      "videoCurrentTime"
-    );
-
-  }
-
-
-  return null;
-
-}
-
-
-function getDurationElement(
-  video
-) {
-
-  if (
-    video.id ===
-    "analysisVideo"
-  ) {
-
-    return document.getElementById(
-      "videoDuration"
-    );
-
-  }
-
-
-  return null;
-
-}
-
-
-/* =========================================================
-   17. SKI POSE RESULTS
-========================================================= */
-
-function handleSkiResults(
-  results
-) {
-
-  const state =
-    AnalysisState.ski;
-
-
-  state.processing =
-    false;
-
-
-  if (
-    !results ||
-    !results.poseLandmarks
-  ) {
-
-    return;
-  }
-
-
-  const landmarks =
-    results.poseLandmarks;
-
-
-  state.lastLandmarks =
-    landmarks;
-
-
-  const angles =
-    calculatePoseAngles(
-      landmarks
-    );
-
-
-  const center =
-    calculateCenter(
-      landmarks
-    );
-
-
-  const time =
-    state.video
-      ? state.video.currentTime
-      : 0;
-
-
-  if (center) {
-
-    state.trajectory.push({
-
-      x: center.x,
-
-      y: center.y,
-
-      t: time
-
-    });
-
-
-    if (
-      state.trajectory.length >
-      500
-    ) {
-
-      state.trajectory.shift();
-
-    }
-
-  }
-
-
-  state.angleHistory.push({
-
-    time,
-
-    ...angles
-
-  });
-
-
-  if (
-    state.angleHistory.length >
-    500
-  ) {
-
-    state.angleHistory.shift();
-
-  }
-
-
-  drawPose(
-
-    state.ctx,
-
-    landmarks,
-
-    state.canvas.width,
-
-    state.canvas.height,
-
-    {
-
-      ...getOverlayOptions(),
-
-      angles,
-
-      centerPoint:
-        center,
-
-      trajectory:
-        state.trajectory
-
-    }
-
-  );
-
-
-  updateSkiAngles(
-    angles
-  );
-
-
-  updateSkiTrajectory(
-    state
-  );
-
-
-  updateSkiChart(
-    state
-  );
-
-
-  maybeCreateKeyFrame(
-    state,
-    landmarks,
-    "ski"
-  );
-
-}
-
-
-/* =========================================================
-   18. ROLLER RESULTS
-========================================================= */
-
-function handleRollerResults(
-  results
-) {
-
-  const state =
-    AnalysisState.roller;
-
-
-  state.processing =
-    false;
-
-
-  if (
-    !results ||
-    !results.poseLandmarks
-  ) {
-
-    return;
-  }
-
-
-  const landmarks =
-    results.poseLandmarks;
-
-
-  state.lastLandmarks =
-    landmarks;
-
-
-  const angles =
-    calculatePoseAngles(
-      landmarks
-    );
-
-
-  const center =
-    calculateCenter(
-      landmarks
-    );
-
-
-  const time =
-    state.video
-      ? state.video.currentTime
-      : 0;
-
-
-  if (center) {
-
-    state.trajectory.push({
-
-      x: center.x,
-
-      y: center.y,
-
-      t: time
-
-    });
-
-
-    if (
-      state.trajectory.length >
-      500
-    ) {
-
-      state.trajectory.shift();
-
-    }
-
-  }
-
-
-  state.angleHistory.push({
-
-    time,
-
-    ...angles
-
-  });
-
-
-  if (
-    state.angleHistory.length >
-    500
-  ) {
-
-    state.angleHistory.shift();
-
-  }
-
-
-  drawPose(
-
-    state.ctx,
-
-    landmarks,
-
-    state.canvas.width,
-
-    state.canvas.height,
-
-    {
-
-      ...getOverlayOptions(),
-
-      angles,
-
-      centerPoint:
-        center,
-
-      trajectory:
-        state.trajectory
-
-    }
-
-  );
-
-
-  updateRollerMetrics(
-    state,
-    angles
-  );
-
-
-  updateRollerChart(
-    state
-  );
-
-
-  maybeCreateKeyFrame(
-    state,
-    landmarks,
-    "roller"
-  );
-
-}
-
-
-/* =========================================================
-   19. SHOOTING RESULTS
-========================================================= */
-
-function handleShootingResults(
-  results
-) {
-
-  const state =
-    AnalysisState.shooting;
-
-
-  state.processing =
-    false;
-
-
-  if (
-    !results ||
-    !results.poseLandmarks
-  ) {
-
-    return;
-  }
-
-
-  const landmarks =
-    results.poseLandmarks;
-
-
-  state.lastLandmarks =
-    landmarks;
-
-
-  const angles =
-    calculatePoseAngles(
-      landmarks
-    );
-
-
-  const center =
-    calculateCenter(
-      landmarks
-    );
-
-
-  const time =
-    state.video
-      ? state.video.currentTime
-      : 0;
-
-
-  if (center) {
-
-    state.trajectory.push({
-
-      x: center.x,
-
-      y: center.y,
-
-      t: time
-
-    });
-
-
-    if (
-      state.trajectory.length >
-      500
-    ) {
-
-      state.trajectory.shift();
-
-    }
-
-  }
-
-
-  state.angleHistory.push({
-
-    time,
-
-    ...angles
-
-  });
-
-
-  if (
-    state.angleHistory.length >
-    500
-  ) {
-
-    state.angleHistory.shift();
-
-  }
-
-
-  drawPose(
-
-    state.ctx,
-
-    landmarks,
-
-    state.canvas.width,
-
-    state.canvas.height,
-
-    {
-
-      ...getOverlayOptions(),
-
-      angles,
-
-      centerPoint:
-        center,
-
-      trajectory:
-        state.trajectory
-
-    }
-
-  );
-
-
-  updateShootingMetrics(
-    state,
-    angles
-  );
-
-
-  updateShootingCharts(
-    state
-  );
-
-
-  maybeDetectTrigger(
-    state,
-    landmarks
-  );
-
-
-  maybeCreateKeyFrame(
-    state,
-    landmarks,
-    "shooting"
-  );
-
-}
-
-
-/* =========================================================
-   20. ANALYSIS LOOP
-========================================================= */
-
-async function processVideoFrame(
-  state
-) {
-
-  if (
-    !state.video ||
-    !state.pose ||
-    !state.running ||
-    state.processing
-  ) {
-
-    return;
-  }
-
-
-  if (
-    state.video.readyState <
-    2
-  ) {
-
-    return;
-  }
-
-
-  if (
-    state.video.ended
-  ) {
-
-    state.running =
-      false;
-
-    return;
-  }
-
-
-  state.processing =
-    true;
-
-
-  try {
-
-    await state.pose.send({
-
-      image:
-        state.video
-
-    });
-
-  } catch (error) {
-
-    state.processing =
-      false;
-
-    console.warn(
-      "Pose processing error:",
-      error
-    );
-
-  }
-
-}
-
-
-/* =========================================================
-   21. REQUEST LOOP
-========================================================= */
-
-function startAnalysisLoop(
-  state
-) {
-
-  if (
-    state.animationFrame
-  ) {
-
-    cancelAnimationFrame(
-      state.animationFrame
-    );
-
-  }
-
-
-  const loop = async () => {
-
-    if (
-      !state.running
-    ) {
-
-      return;
-    }
-
-
-    await processVideoFrame(
-      state
-    );
-
-
-    state.animationFrame =
-      requestAnimationFrame(
-        loop
-      );
-
-  };
-
-
-  loop();
-
-}
-
-
-/* =========================================================
-   22. SKI INIT
-========================================================= */
-
-function initSkiAnalysis() {
-
-  const video =
-    document.getElementById(
-      "analysisVideo"
-    );
-
-  const canvas =
-    document.getElementById(
-      "poseCanvas"
-    );
-
-
-  if (!video || !canvas) {
-    return;
-  }
-
-
-  const state =
-    AnalysisState.ski;
-
-
-  state.video =
-    video;
-
-  state.canvas =
-    canvas;
-
-  state.ctx =
-    canvas.getContext(
-      "2d"
-    );
-
-
-  state.pose =
-    createPose(
-      handleSkiResults
-    );
-
-
-  const input =
-    document.getElementById(
-      "videoInput"
-    );
-
-
-  const placeholder =
-    document.getElementById(
-      "videoPlaceholder"
-    );
-
-
-  input?.addEventListener(
-    "change",
-    () => {
-
-      resetAnalysisState(
-        state
-      );
-
-
-      loadVideoFile(
-        input,
-        video,
-        placeholder,
-        state
-      );
-
-    }
-  );
-
-
-  document
-    .getElementById(
-      "uploadVideoButton"
-    )
-    ?.addEventListener(
-      "click",
-      () => input?.click()
-    );
-
-
-  document
-    .getElementById(
-      "videoPlayPause"
-    )
-    ?.addEventListener(
-      "click",
-      () => {
-
-        toggleVideo(
-          video
-        );
-
-      }
-    );
-
-
-  document
-    .getElementById(
-      "videoPrevFrame"
-    )
-    ?.addEventListener(
-      "click",
-      () => {
-
-        stepFrame(
-          video,
-          -1
-        );
-
-      }
-    );
-
-
-  document
-    .getElementById(
-      "videoNextFrame"
-    )
-    ?.addEventListener(
-      "click",
-      () => {
-
-        stepFrame(
-          video,
-          1
-        );
-
-      }
-    );
-
-
-  document
-    .getElementById(
-      "videoSlow"
-    )
-    ?.addEventListener(
-      "click",
-      () => {
-
-        setVideoSpeed(
-          video,
-          0.5
-        );
-
-      }
-    );
-
-
-  document
-    .getElementById(
-      "videoNormal"
-    )
-    ?.addEventListener(
-      "click",
-      () => {
-
-        setVideoSpeed(
-          video,
-          1
-        );
-
-      }
-    );
-
-
-  document
-    .getElementById(
-      "videoSeek"
-    )
-    ?.addEventListener(
-      "input",
-      event => {
 
         if (
-          !Number.isFinite(
-            video.duration
-          )
+          !p1 ||
+          !p2
         ) {
 
+          return;
+
+        }
+
+
+        const v1 =
+          p1.visibility ===
+          undefined
+            ? 1
+            : p1.visibility;
+
+
+        const v2 =
+          p2.visibility ===
+          undefined
+            ? 1
+            : p2.visibility;
+
+
+        if (
+          v1 < 0.4 ||
+          v2 < 0.4
+        ) {
+
+          return;
+
+        }
+
+
+        ctx.beginPath();
+
+
+        ctx.moveTo(
+          p1.x * width,
+          p1.y * height
+        );
+
+
+        ctx.lineTo(
+          p2.x * width,
+          p2.y * height
+        );
+
+
+        ctx.stroke();
+
+      }
+    );
+
+
+    /*
+     * 관절
+     */
+
+    landmarks.forEach(
+      point => {
+
+        if (!point) {
           return;
         }
 
 
-        video.currentTime =
-          (
-            Number(
-              event.target.value
-            ) / 100
-          ) *
-          video.duration;
+        const visibility =
+          point.visibility ===
+          undefined
+            ? 1
+            : point.visibility;
 
-      }
-    );
 
+        if (
+          visibility < 0.4
+        ) {
 
-  video.addEventListener(
-    "timeupdate",
-    () => {
+          return;
 
-      updateVideoUI(
-        state,
-        video
-      );
+        }
 
-    }
-  );
 
+        ctx.beginPath();
 
-  document
-    .getElementById(
-      "startAnalysis"
-    )
-    ?.addEventListener(
-      "click",
-      () => {
 
-        startSkiAnalysis();
-
-      }
-    );
-
-
-  document
-    .getElementById(
-      "stopAnalysis"
-    )
-    ?.addEventListener(
-      "click",
-      () => {
-
-        stopSkiAnalysis();
-
-      }
-    );
-
-}
-
-
-/* =========================================================
-   23. START SKI
-========================================================= */
-
-function startSkiAnalysis() {
-
-  const state =
-    AnalysisState.ski;
-
-
-  if (!state.video?.src) {
-
-    BiathlonEvents?.showToast(
-      "먼저 스키 영상을 선택하세요."
-    );
-
-    return;
-  }
-
-
-  if (!state.pose) {
-
-    BiathlonEvents?.showToast(
-      "자세분석 엔진을 불러오는 중입니다."
-    );
-
-    return;
-  }
-
-
-  state.running =
-    true;
-
-
-  state.processing =
-    false;
-
-
-  startAnalysisLoop(
-    state
-  );
-
-
-  BiathlonEvents?.showToast(
-    "스키 자세분석을 시작했습니다."
-  );
-
-}
-
-
-/* =========================================================
-   24. STOP SKI
-========================================================= */
-
-function stopSkiAnalysis() {
-
-  const state =
-    AnalysisState.ski;
-
-
-  state.running =
-    false;
-
-
-  state.processing =
-    false;
-
-
-  state.video?.pause();
-
-
-  const score =
-    calculateSkiScore(
-      state
-    );
-
-
-  state.score =
-    score;
-
-
-  updateSkiScore(
-    score
-  );
-
-
-  saveAnalysis(
-    "ski",
-    state
-  );
-
-
-  BiathlonEvents?.showToast(
-    "스키 분석을 저장했습니다."
-  );
-
-}
-
-
-/* =========================================================
-   25. SKI SCORE
-========================================================= */
-
-function calculateSkiScore(
-  state
-) {
-
-  if (
-    !state.angleHistory.length
-  ) {
-
-    return null;
-  }
-
-
-  const kneeValues =
-    state.angleHistory.flatMap(
-      item => [
-        item.leftKnee,
-        item.rightKnee
-      ]
-    )
-      .filter(
-        Number.isFinite
-      );
-
-
-  const symmetry =
-    calculateSymmetry(
-      state.angleHistory
-    );
-
-
-  const stability =
-    calculateTrajectoryStability(
-      state.trajectory
-    );
-
-
-  const kneeAverage =
-    average(
-      kneeValues
-    );
-
-
-  let angleScore =
-    70;
-
-
-  if (
-    kneeAverage >= 100 &&
-    kneeAverage <= 150
-  ) {
-
-    angleScore =
-      90;
-
-  }
-
-
-  if (
-    kneeAverage >= 115 &&
-    kneeAverage <= 140
-  ) {
-
-    angleScore =
-      96;
-
-  }
-
-
-  return Math.round(
-    clamp(
-      angleScore * 0.4 +
-      symmetry * 0.3 +
-      stability * 0.3,
-      0,
-      100
-    )
-  );
-
-}
-
-
-/* =========================================================
-   26. ROLLER INIT
-========================================================= */
-
-function initRollerAnalysis() {
-
-  const video =
-    document.getElementById(
-      "rollerVideo"
-    );
-
-  const canvas =
-    document.getElementById(
-      "rollerPoseCanvas"
-    );
-
-
-  if (!video || !canvas) {
-    return;
-  }
-
-
-  const state =
-    AnalysisState.roller;
-
-
-  state.video =
-    video;
-
-  state.canvas =
-    canvas;
-
-  state.ctx =
-    canvas.getContext(
-      "2d"
-    );
-
-
-  state.pose =
-    createPose(
-      handleRollerResults
-    );
-
-
-  const input =
-    document.getElementById(
-      "rollerVideoInput"
-    );
-
-
-  const placeholder =
-    document.getElementById(
-      "rollerVideoPlaceholder"
-    );
-
-
-  input?.addEventListener(
-    "change",
-    () => {
-
-      resetAnalysisState(
-        state
-      );
-
-
-      loadVideoFile(
-        input,
-        video,
-        placeholder,
-        state
-      );
-
-    }
-  );
-
-
-  document
-    .getElementById(
-      "rollerUploadButton"
-    )
-    ?.addEventListener(
-      "click",
-      () => input?.click()
-    );
-
-
-  document
-    .getElementById(
-      "rollerPlayPause"
-    )
-    ?.addEventListener(
-      "click",
-      () => toggleVideo(video)
-    );
-
-
-  document
-    .getElementById(
-      "rollerPrevFrame"
-    )
-    ?.addEventListener(
-      "click",
-      () => stepFrame(video, -1)
-    );
-
-
-  document
-    .getElementById(
-      "rollerNextFrame"
-    )
-    ?.addEventListener(
-      "click",
-      () => stepFrame(video, 1)
-    );
-
-
-  document
-    .getElementById(
-      "rollerSlow"
-    )
-    ?.addEventListener(
-      "click",
-      () => setVideoSpeed(video, 0.5)
-    );
-
-
-  document
-    .getElementById(
-      "rollerNormal"
-    )
-    ?.addEventListener(
-      "click",
-      () => setVideoSpeed(video, 1)
-    );
-
-
-  document
-    .getElementById(
-      "rollerStartAnalysis"
-    )
-    ?.addEventListener(
-      "click",
-      startRollerAnalysis
-    );
-
-
-  document
-    .getElementById(
-      "rollerStopAnalysis"
-    )
-    ?.addEventListener(
-      "click",
-      stopRollerAnalysis
-    );
-
-}
-
-
-/* =========================================================
-   27. START ROLLER
-========================================================= */
-
-function startRollerAnalysis() {
-
-  const state =
-    AnalysisState.roller;
-
-
-  if (!state.video?.src) {
-
-    BiathlonEvents?.showToast(
-      "먼저 롤러스키 영상을 선택하세요."
-    );
-
-    return;
-  }
-
-
-  if (!state.pose) {
-
-    BiathlonEvents?.showToast(
-      "자세분석 엔진을 불러오는 중입니다."
-    );
-
-    return;
-  }
-
-
-  state.running =
-    true;
-
-
-  startAnalysisLoop(
-    state
-  );
-
-
-  BiathlonEvents?.showToast(
-    "롤러스키 분석을 시작했습니다."
-  );
-
-}
-
-
-/* =========================================================
-   28. STOP ROLLER
-========================================================= */
-
-function stopRollerAnalysis() {
-
-  const state =
-    AnalysisState.roller;
-
-
-  state.running =
-    false;
-
-
-  state.video?.pause();
-
-
-  const score =
-    calculateRollerScore(
-      state
-    );
-
-
-  state.score =
-    score;
-
-
-  updateRollerScore(
-    score
-  );
-
-
-  saveAnalysis(
-    "roller",
-    state
-  );
-
-
-  BiathlonEvents?.showToast(
-    "롤러스키 분석을 저장했습니다."
-  );
-
-}
-
-
-/* =========================================================
-   29. ROLLER SCORE
-========================================================= */
-
-function calculateRollerScore(
-  state
-) {
-
-  if (
-    !state.angleHistory.length
-  ) {
-
-    return null;
-  }
-
-
-  const symmetry =
-    calculateSymmetry(
-      state.angleHistory
-    );
-
-
-  const stability =
-    calculateTrajectoryStability(
-      state.trajectory
-    );
-
-
-  const consistency =
-    calculateConsistency(
-      state.angleHistory
-    );
-
-
-  return Math.round(
-    clamp(
-      symmetry * 0.35 +
-      stability * 0.3 +
-      consistency * 0.35,
-      0,
-      100
-    )
-  );
-
-}
-
-
-/* =========================================================
-   30. ROLLER METRICS
-========================================================= */
-
-function updateRollerMetrics(
-  state,
-  angles
-) {
-
-  const left =
-    angles.leftKnee;
-
-  const right =
-    angles.rightKnee;
-
-
-  const symmetry =
-    calculateSingleSymmetry(
-      left,
-      right
-    );
-
-
-  const consistency =
-    calculateConsistency(
-      state.angleHistory
-    );
-
-
-  const stability =
-    calculateTrajectoryStability(
-      state.trajectory
-    );
-
-
-  setText(
-    "rollerPropulsion",
-    `${Math.round(
-      clamp(
-        60 +
-        (
-          average([
-            left,
-            right
-          ]) || 0
-        ) * 0.2,
-        0,
-        100
-      )
-    )}`
-  );
-
-
-  setText(
-    "rollerRecovery",
-    `${Math.round(
-      clamp(
-        70 +
-        (
-          symmetry - 70
-        ) * 0.4,
-        0,
-        100
-      )
-    )}`
-  );
-
-
-  setText(
-    "rollerSymmetry",
-    `${Math.round(
-      symmetry
-    )}`
-  );
-
-
-  setText(
-    "rollerConsistency",
-    `${Math.round(
-      consistency
-    )}`
-  );
-
-
-  const liveScore =
-    Math.round(
-      (
-        symmetry +
-        consistency +
-        stability
-      ) / 3
-    );
-
-
-  setText(
-    "rollerAnalysisScore",
-    liveScore
-  );
-
-}
-
-
-/* =========================================================
-   31. SHOOTING INIT
-========================================================= */
-
-function initShootingAnalysis() {
-
-  const video =
-    document.getElementById(
-      "shootingVideo"
-    );
-
-  const canvas =
-    document.getElementById(
-      "shootingPoseCanvas"
-    );
-
-
-  if (!video || !canvas) {
-    return;
-  }
-
-
-  const state =
-    AnalysisState.shooting;
-
-
-  state.video =
-    video;
-
-  state.canvas =
-    canvas;
-
-  state.ctx =
-    canvas.getContext(
-      "2d"
-    );
-
-
-  state.pose =
-    createPose(
-      handleShootingResults
-    );
-
-
-  const input =
-    document.getElementById(
-      "shootingVideoInput"
-    );
-
-
-  const placeholder =
-    document.getElementById(
-      "shootingVideoPlaceholder"
-    );
-
-
-  input?.addEventListener(
-    "change",
-    () => {
-
-      resetAnalysisState(
-        state
-      );
-
-
-      loadVideoFile(
-        input,
-        video,
-        placeholder,
-        state
-      );
-
-    }
-  );
-
-
-  document
-    .getElementById(
-      "shootingUploadButton"
-    )
-    ?.addEventListener(
-      "click",
-      () => input?.click()
-    );
-
-
-  document
-    .getElementById(
-      "shootingPlayPause"
-    )
-    ?.addEventListener(
-      "click",
-      () => toggleVideo(video)
-    );
-
-
-  document
-    .getElementById(
-      "shootingPrevFrame"
-    )
-    ?.addEventListener(
-      "click",
-      () => stepFrame(video, -1)
-    );
-
-
-  document
-    .getElementById(
-      "shootingNextFrame"
-    )
-    ?.addEventListener(
-      "click",
-      () => stepFrame(video, 1)
-    );
-
-
-  document
-    .getElementById(
-      "shootingSlow"
-    )
-    ?.addEventListener(
-      "click",
-      () => setVideoSpeed(video, 0.25)
-    );
-
-
-  document
-    .getElementById(
-      "shootingNormal"
-    )
-    ?.addEventListener(
-      "click",
-      () => setVideoSpeed(video, 1)
-    );
-
-
-  document
-    .getElementById(
-      "shootingStartAnalysis"
-    )
-    ?.addEventListener(
-      "click",
-      startShootingAnalysis
-    );
-
-
-  document
-    .getElementById(
-      "shootingStopAnalysis"
-    )
-    ?.addEventListener(
-      "click",
-      stopShootingAnalysis
-    );
-
-
-  document
-    .querySelectorAll(
-      ".shot-card"
-    )
-    .forEach(
-      card => {
-
-        card.addEventListener(
-          "click",
-          () => {
-
-            selectShot(
-              Number(
-                card.dataset.shot
-              )
-            );
-
-          }
+        ctx.arc(
+          point.x * width,
+          point.y * height,
+          Math.max(
+            3,
+            width / 300
+          ),
+          0,
+          Math.PI * 2
         );
 
+
+        ctx.fillStyle =
+          "#ffffff";
+
+
+        ctx.fill();
+
       }
     );
 
-}
 
+    /*
+     * 선수 중심
+     */
 
-/* =========================================================
-   32. START SHOOTING
-========================================================= */
+    if (center) {
 
-function startShootingAnalysis() {
+      ctx.beginPath();
 
-  const state =
-    AnalysisState.shooting;
 
+      ctx.arc(
+        center.x * width,
+        center.y * height,
+        Math.max(
+          6,
+          width / 180
+        ),
+        0,
+        Math.PI * 2
+      );
 
-  if (!state.video?.src) {
 
-    BiathlonEvents?.showToast(
-      "먼저 사격 영상을 선택하세요."
-    );
+      ctx.fillStyle =
+        "#9bc6d6";
 
-    return;
-  }
 
+      ctx.fill();
 
-  if (!state.pose) {
+    }
 
-    BiathlonEvents?.showToast(
-      "자세분석 엔진을 불러오는 중입니다."
-    );
+  },
 
-    return;
-  }
 
+  /* =======================================================
+     14. METRICS
+  ======================================================= */
 
-  state.running =
-    true;
+  metrics(session) {
 
+    const history =
+      session.angles || [];
 
-  startAnalysisLoop(
-    state
-  );
-
-
-  BiathlonEvents?.showToast(
-    "사격 자세분석을 시작했습니다."
-  );
-
-}
-
-
-/* =========================================================
-   33. STOP SHOOTING
-========================================================= */
-
-function stopShootingAnalysis() {
-
-  const state =
-    AnalysisState.shooting;
-
-
-  state.running =
-    false;
-
-
-  state.video?.pause();
-
-
-  autoBuildShots(
-    state
-  );
-
-
-  const score =
-    calculateShootingScore(
-      state
-    );
-
-
-  state.score =
-    score;
-
-
-  updateShootingScore(
-    score
-  );
-
-
-  saveAnalysis(
-    "shooting",
-    state
-  );
-
-
-  BiathlonEvents?.showToast(
-    "사격 분석을 저장했습니다."
-  );
-
-}
-
-
-/* =========================================================
-   34. SHOOTING SCORE
-========================================================= */
-
-function calculateShootingScore(
-  state
-) {
-
-  const stability =
-    calculateTrajectoryStability(
-      state.trajectory
-    );
-
-
-  const consistency =
-    calculateConsistency(
-      state.angleHistory
-    );
-
-
-  const shotScore =
-    calculateShotScore(
-      state.shots
-    );
-
-
-  return Math.round(
-    clamp(
-      stability * 0.35 +
-      consistency * 0.35 +
-      shotScore * 0.3,
-      0,
-      100
-    )
-  );
-
-}
-
-
-/* =========================================================
-   35. TRIGGER DETECTION
-========================================================= */
-
-function maybeDetectTrigger(
-  state,
-  landmarks
-) {
-
-  if (!state.video) {
-    return;
-  }
-
-
-  const time =
-    state.video.currentTime;
-
-
-  const history =
-    state.angleHistory;
-
-
-  if (
-    history.length < 4
-  ) {
-
-    return;
-  }
-
-
-  const current =
-    history[
-      history.length - 1
-    ];
-
-
-  const previous =
-    history[
-      history.length - 2
-    ];
-
-
-  const currentKnee =
-    average([
-      current.leftKnee,
-      current.rightKnee
-    ]);
-
-
-  const previousKnee =
-    average([
-      previous.leftKnee,
-      previous.rightKnee
-    ]);
-
-
-  const movement =
-    Math.abs(
-      currentKnee -
-      previousKnee
-    );
-
-
-  /*
-    영상만으로 실제 격발 여부를 확정할 수 없으므로
-    큰 움직임을 "격발 후보"로 기록한다.
-  */
-
-  if (
-    movement > 4
-  ) {
 
     const last =
-      state.triggerData[
-        state.triggerData.length - 1
-      ];
+      history[
+        history.length - 1
+      ] || {};
+
+
+    const kneeValues =
+      history
+        .flatMap(
+          item => [
+            item.leftKnee,
+            item.rightKnee
+          ]
+        )
+        .filter(
+          Number.isFinite
+        );
+
+
+    const kneeMean =
+      kneeValues.length
+        ? kneeValues.reduce(
+            (sum, value) =>
+              sum + value,
+            0
+          ) /
+          kneeValues.length
+        : 0;
+
+
+    /*
+     * 좌우 대칭
+     */
+
+    let symmetry =
+      70;
 
 
     if (
-      !last ||
-      Math.abs(
-        last.time - time
-      ) > 0.35
+      Number.isFinite(
+        last.leftKnee
+      ) &&
+      Number.isFinite(
+        last.rightKnee
+      )
     ) {
 
-      state.triggerData.push({
+      const difference =
+        Math.abs(
+          last.leftKnee -
+          last.rightKnee
+        );
 
-        time,
 
-        movement,
-
-        confidence:
-          clamp(
-            movement / 15,
-            0,
-            1
-          ),
-
-        source:
-          "video-motion-candidate"
-
-      });
+      symmetry =
+        Math.max(
+          0,
+          Math.min(
+            100,
+            100 -
+              difference *
+              2
+          )
+        );
 
     }
 
-  }
+
+    const stability =
+      this.stability(
+        session.trajectory
+      );
 
 
-  if (
-    state.triggerData.length >
-    20
+    const consistency =
+      this.consistency(
+        kneeValues
+      );
+
+
+    return {
+
+      symmetry:
+        Math.round(
+          symmetry
+        ),
+
+      stability:
+        Math.round(
+          stability
+        ),
+
+      consistency:
+        Math.round(
+          consistency
+        ),
+
+      leftKnee:
+        last.leftKnee,
+
+      rightKnee:
+        last.rightKnee,
+
+      leftHip:
+        last.leftHip,
+
+      rightHip:
+        last.rightHip,
+
+      leftElbow:
+        last.leftElbow,
+
+      rightElbow:
+        last.rightElbow,
+
+      kneeMean
+
+    };
+
+  },
+
+
+  /* =======================================================
+     15. STABILITY
+  ======================================================= */
+
+  stability(
+    trajectory
   ) {
 
-    state.triggerData =
-      state.triggerData.slice(-20);
+    if (
+      !trajectory ||
+      trajectory.length < 5
+    ) {
 
-  }
+      return 70;
 
-
-  updateTriggerTimeline(
-    state
-  );
-
-}
+    }
 
 
-/* =========================================================
-   36. AUTO BUILD 5 SHOTS
-========================================================= */
+    const points =
+      trajectory.slice(
+        -120
+      );
 
-function autoBuildShots(
-  state
-) {
 
-  const candidates =
-    state.triggerData
-      .slice()
-      .sort(
+    let meanX =
+      0;
+
+    let meanY =
+      0;
+
+
+    points.forEach(
+      point => {
+
+        meanX += point.x;
+
+        meanY += point.y;
+
+      }
+    );
+
+
+    meanX /=
+      points.length;
+
+
+    meanY /=
+      points.length;
+
+
+    let variance =
+      0;
+
+
+    points.forEach(
+      point => {
+
+        variance +=
+          (
+            point.x -
+            meanX
+          ) ** 2 +
+          (
+            point.y -
+            meanY
+          ) ** 2;
+
+      }
+    );
+
+
+    variance /=
+      points.length;
+
+
+    const deviation =
+      Math.sqrt(
+        variance
+      );
+
+
+    return Math.max(
+      0,
+      Math.min(
+        100,
+        100 -
+          deviation *
+          220
+      )
+    );
+
+  },
+
+
+  /* =======================================================
+     16. CONSISTENCY
+  ======================================================= */
+
+  consistency(
+    values
+  ) {
+
+    if (
+      !values ||
+      values.length < 5
+    ) {
+
+      return 70;
+
+    }
+
+
+    const mean =
+      values.reduce(
         (a, b) =>
-          a.time - b.time
+          a + b,
+        0
+      ) /
+      values.length;
+
+
+    const variance =
+      values.reduce(
+        (sum, value) =>
+          sum +
+          (
+            value -
+            mean
+          ) ** 2,
+        0
+      ) /
+      values.length;
+
+
+    const sd =
+      Math.sqrt(
+        variance
       );
 
 
-  const selected = [];
-
-
-  candidates.forEach(
-    candidate => {
-
-      const tooClose =
-        selected.some(
-          item =>
-            Math.abs(
-              item.time -
-              candidate.time
-            ) < 0.7
-        );
-
-
-      if (!tooClose) {
-
-        selected.push(
-          candidate
-        );
-
-      }
-
-    }
-  );
-
-
-  state.shots =
-    selected
-      .slice(0, 5)
-      .map(
-        (item, index) => ({
-
-          number:
-            index + 1,
-
-          time:
-            item.time,
-
-          interval:
-            index === 0
-              ? item.time
-              : item.time -
-                selected[index - 1]
-                  .time,
-
-          status:
-            "분석 필요",
-
-          confidence:
-            item.confidence
-
-        })
-      );
-
-
-  updateShotCards(
-    state
-  );
-
-}
-
-
-/* =========================================================
-   37. SHOT SCORE
-========================================================= */
-
-function calculateShotScore(
-  shots
-) {
-
-  if (!shots.length) {
-    return 70;
-  }
-
-
-  const values =
-    shots.map(
-      shot =>
-        shot.status === "명중"
-          ? 100
-          : shot.status === "미스"
-            ? 40
-            : 70
-    );
-
-
-  return average(
-    values
-  );
-
-}
-
-
-/* =========================================================
-   38. SELECT SHOT
-========================================================= */
-
-function selectShot(
-  number
-) {
-
-  document
-    .querySelectorAll(
-      ".shot-card"
-    )
-    .forEach(
-      card => {
-
-        card.classList.toggle(
-          "active",
-          Number(
-            card.dataset.shot
-          ) === number
-        );
-
-      }
-    );
-
-
-  const state =
-    AnalysisState.shooting;
-
-
-  const shot =
-    state.shots.find(
-      item =>
-        item.number === number
-    );
-
-
-  if (!shot) {
-    return;
-  }
-
-
-  if (state.video) {
-
-    state.video.currentTime =
-      shot.time;
-
-  }
-
-}
-
-
-/* =========================================================
-   39. UPDATE SHOT CARDS
-========================================================= */
-
-function updateShotCards(
-  state
-) {
-
-  for (
-    let i = 1;
-    i <= 5;
-    i++
-  ) {
-
-    const shot =
-      state.shots.find(
-        item =>
-          item.number === i
-      );
-
-
-    const status =
-      document.getElementById(
-        `shot${i}Status`
-      );
-
-
-    const time =
-      document.getElementById(
-        `shot${i}Time`
-      );
-
-
-    if (!shot) {
-
-      if (status) {
-        status.textContent = "-";
-      }
-
-      if (time) {
-        time.textContent = "-";
-      }
-
-      continue;
-    }
-
-
-    if (status) {
-
-      status.textContent =
-        shot.status ||
-        "분석 필요";
-
-    }
-
-
-    if (time) {
-
-      time.textContent =
-        formatTime(
-          shot.time
-        );
-
-    }
-
-  }
-
-}
-
-
-/* =========================================================
-   40. TRIGGER TIMELINE
-========================================================= */
-
-function updateTriggerTimeline(
-  state
-) {
-
-  const container =
-    document.getElementById(
-      "triggerTimeline"
-    );
-
-
-  if (!container) {
-    return;
-  }
-
-
-  if (
-    !state.triggerData.length
-  ) {
-
-    container.innerHTML = `
-      <div class="empty-state">
-        영상에서 격발 후보를 찾는 중입니다.
-      </div>
-    `;
-
-    return;
-  }
-
-
-  container.innerHTML =
-    state.triggerData
-      .slice(-10)
-      .map(
-        (item, index) => `
-
-          <div class="trigger-marker">
-
-            <strong>
-              ${index + 1}
-            </strong>
-
-            <span>
-              ${formatTime(
-                item.time
-              )}
-            </span>
-
-          </div>
-
-        `
-      )
-      .join("");
-
-}
-
-
-/* =========================================================
-   41. RESET
-========================================================= */
-
-function resetAnalysisState(
-  state
-) {
-
-  state.running =
-    false;
-
-  state.processing =
-    false;
-
-  state.duration =
-    0;
-
-  state.currentTime =
-    0;
-
-  state.trajectory =
-    [];
-
-  state.angleHistory =
-    [];
-
-  state.keyFrames =
-    [];
-
-  state.triggerData =
-    [];
-
-  state.shots =
-    [];
-
-  state.score =
-    null;
-
-  state.lastLandmarks =
-    null;
-
-  state.frameCount =
-    0;
-
-
-  if (state.ctx) {
-
-    state.ctx.clearRect(
+    return Math.max(
       0,
-      0,
-      state.canvas.width,
-      state.canvas.height
-    );
-
-  }
-
-}
-
-
-/* =========================================================
-   42. KEY FRAME
-========================================================= */
-
-function maybeCreateKeyFrame(
-  state,
-  landmarks,
-  type
-) {
-
-  if (
-    !state.video ||
-    !hasUsablePose(landmarks)
-  ) {
-
-    return;
-  }
-
-
-  state.frameCount++;
-
-
-  /*
-    너무 많은 사진을 만들지 않도록
-    일정 프레임 간격으로 후보를 저장한다.
-  */
-
-  if (
-    state.frameCount % 30 !== 0
-  ) {
-
-    return;
-  }
-
-
-  const angles =
-    calculatePoseAngles(
-      landmarks
-    );
-
-
-  const quality =
-    calculateFrameQuality(
-      angles,
-      state.trajectory
-    );
-
-
-  const frame = {
-
-    type,
-
-    time:
-      state.video.currentTime,
-
-    quality,
-
-    angles: {
-      ...angles
-    }
-
-  };
-
-
-  /*
-    상위 8개만 유지
-  */
-
-  state.keyFrames.push(
-    frame
-  );
-
-
-  state.keyFrames.sort(
-    (a, b) =>
-      b.quality -
-      a.quality
-  );
-
-
-  state.keyFrames =
-    state.keyFrames.slice(
-      0,
-      8
-    );
-
-
-  renderKeyFrames(
-    state,
-    type
-  );
-
-}
-
-
-/* =========================================================
-   43. FRAME QUALITY
-========================================================= */
-
-function calculateFrameQuality(
-  angles,
-  trajectory
-) {
-
-  const kneeAverage =
-    average([
-      angles.leftKnee,
-      angles.rightKnee
-    ]);
-
-
-  const symmetry =
-    calculateSingleSymmetry(
-      angles.leftKnee,
-      angles.rightKnee
-    );
-
-
-  const stability =
-    calculateTrajectoryStability(
-      trajectory
-    );
-
-
-  let angleQuality =
-    70;
-
-
-  if (
-    kneeAverage >= 100 &&
-    kneeAverage <= 150
-  ) {
-
-    angleQuality =
-      90;
-
-  }
-
-
-  return clamp(
-    angleQuality * 0.45 +
-    symmetry * 0.3 +
-    stability * 0.25,
-    0,
-    100
-  );
-
-}
-
-
-/* =========================================================
-   44. RENDER KEY FRAMES
-========================================================= */
-
-function renderKeyFrames(
-  state,
-  type
-) {
-
-  const ids = {
-
-    ski:
-      "skiKeyFrameList",
-
-    roller:
-      "rollerKeyFrameList",
-
-    shooting:
-      "shootingKeyFrameList"
-
-  };
-
-
-  const countIds = {
-
-    shooting:
-      "shootingKeyFrameCount",
-
-    ski:
-      "skiKeyFrameCount",
-
-    roller:
-      null
-
-  };
-
-
-  const container =
-    document.getElementById(
-      ids[type]
-    );
-
-
-  if (!container) {
-    return;
-  }
-
-
-  const count =
-    document.getElementById(
-      countIds[type]
-    );
-
-
-  if (count) {
-
-    count.textContent =
-      state.keyFrames.length;
-
-  }
-
-
-  if (!state.keyFrames.length) {
-
-    container.innerHTML = `
-      <div class="empty-state">
-        분석 후 자동으로 추출됩니다.
-      </div>
-    `;
-
-    return;
-  }
-
-
-  container.innerHTML =
-    state.keyFrames
-      .map(
-        (frame, index) => `
-
-          <div
-            class="key-frame"
-            data-key-time="${frame.time}"
-            data-key-type="${type}"
-          >
-
-            <div
-              style="
-                width:100%;
-                height:100%;
-                min-height:150px;
-                display:flex;
-                align-items:center;
-                justify-content:center;
-                color:#aebdc6;
-                background:#071018;
-                font-size:12px;
-              "
-            >
-              FRAME ${index + 1}
-            </div>
-
-            <div class="key-frame-label">
-              ${formatTime(
-                frame.time
-              )}
-              ·
-              ${Math.round(
-                frame.quality
-              )}점
-            </div>
-
-          </div>
-
-        `
-      )
-      .join("");
-
-
-  container
-    .querySelectorAll(
-      "[data-key-time]"
-    )
-    .forEach(
-      element => {
-
-        element.addEventListener(
-          "click",
-          () => {
-
-            if (state.video) {
-
-              state.video.currentTime =
-                Number(
-                  element.dataset
-                    .keyTime
-                );
-
-            }
-
-          }
-        );
-
-      }
-    );
-
-}
-
-
-/* =========================================================
-   45. SYMMETRY
-========================================================= */
-
-function calculateSingleSymmetry(
-  left,
-  right
-) {
-
-  if (
-    !Number.isFinite(left) ||
-    !Number.isFinite(right)
-  ) {
-
-    return 70;
-  }
-
-
-  const difference =
-    Math.abs(
-      left - right
-    );
-
-
-  return clamp(
-    100 -
-    difference * 1.8,
-    0,
-    100
-  );
-
-}
-
-
-function calculateSymmetry(
-  history
-) {
-
-  if (!history.length) {
-    return 70;
-  }
-
-
-  const values =
-    history.map(
-      item =>
-        calculateSingleSymmetry(
-          item.leftKnee,
-          item.rightKnee
-        )
-    );
-
-
-  return average(
-    values
-  );
-
-}
-
-
-/* =========================================================
-   46. TRAJECTORY STABILITY
-========================================================= */
-
-function calculateTrajectoryStability(
-  trajectory
-) {
-
-  if (
-    !trajectory ||
-    trajectory.length < 5
-  ) {
-
-    return 70;
-  }
-
-
-  const recent =
-    trajectory.slice(-100);
-
-
-  const xs =
-    recent.map(
-      point =>
-        point.x
-    );
-
-
-  const ys =
-    recent.map(
-      point =>
-        point.y
-    );
-
-
-  const xMean =
-    average(xs);
-
-
-  const yMean =
-    average(ys);
-
-
-  const variance =
-    average(
-      recent.map(
-        point =>
-          Math.pow(
-            point.x - xMean,
-            2
-          ) +
-          Math.pow(
-            point.y - yMean,
-            2
-          )
+      Math.min(
+        100,
+        100 -
+          sd *
+          2.5
       )
     );
 
-
-  /*
-    화면 좌표 기준 분산.
-    실제 거리/속도값이 아니므로
-    자세 안정성의 참고 점수로만 사용.
-  */
-
-  return clamp(
-    100 -
-    Math.sqrt(variance) * 220,
-    0,
-    100
-  );
-
-}
+  },
 
 
-/* =========================================================
-   47. CONSISTENCY
-========================================================= */
+  /* =======================================================
+     17. SCORE
+  ======================================================= */
 
-function calculateConsistency(
-  history
-) {
-
-  if (
-    !history ||
-    history.length < 5
+  score(
+    session
   ) {
 
-    return 70;
-  }
-
-
-  const values =
-    history
-      .map(
-        item =>
-          average([
-            item.leftKnee,
-            item.rightKnee
-          ])
-      )
-      .filter(
-        Number.isFinite
+    const metrics =
+      this.metrics(
+        session
       );
 
 
-  if (!values.length) {
-    return 70;
-  }
+    return Math.round(
 
-
-  const mean =
-    average(values);
-
-
-  const variance =
-    average(
-      values.map(
-        value =>
-          Math.pow(
-            value - mean,
-            2
-          )
-      )
-    );
-
-
-  const sd =
-    Math.sqrt(
-      variance
-    );
-
-
-  return clamp(
-    100 -
-    sd * 2.5,
-    0,
-    100
-  );
-
-}
-
-
-/* =========================================================
-   48. UPDATE SKI ANGLES
-========================================================= */
-
-function updateSkiAngles(
-  angles
-) {
-
-  setText(
-    "skiLeftKnee",
-    formatAngle(
-      angles.leftKnee
-    )
-  );
-
-
-  setText(
-    "skiRightKnee",
-    formatAngle(
-      angles.rightKnee
-    )
-  );
-
-
-  setText(
-    "skiLeftHip",
-    formatAngle(
-      angles.leftHip
-    )
-  );
-
-
-  setText(
-    "skiRightHip",
-    formatAngle(
-      angles.rightHip
-    )
-  );
-
-
-  setText(
-    "skiTrunk",
-    formatAngle(
-      angles.trunk
-    )
-  );
-
-
-  setText(
-    "skiSymmetry",
-    `${Math.round(
-      calculateSingleSymmetry(
-        angles.leftKnee,
-        angles.rightKnee
-      )
-    )}`
-  );
-
-}
-
-
-/* =========================================================
-   49. FORMAT ANGLE
-========================================================= */
-
-function formatAngle(
-  angle
-) {
-
-  return Number.isFinite(
-    angle
-  )
-    ? `${Math.round(angle)}°`
-    : "-";
-
-}
-
-
-/* =========================================================
-   50. UPDATE SKI SCORE
-========================================================= */
-
-function updateSkiScore(
-  score
-) {
-
-  setText(
-    "skiAnalysisScore",
-    score ?? "-"
-  );
-
-
-  const bar =
-    document.getElementById(
-      "skiScoreBar"
-    );
-
-
-  if (bar) {
-
-    bar.style.width =
-      `${clamp(
-        score || 0,
-        0,
-        100
-      )}%`;
-
-  }
-
-}
-
-
-/* =========================================================
-   51. UPDATE ROLLER SCORE
-========================================================= */
-
-function updateRollerScore(
-  score
-) {
-
-  setText(
-    "rollerAnalysisScore",
-    score ?? "-"
-  );
-
-
-  setText(
-    "rollerTotalScore",
-    score ?? "-"
-  );
-
-
-  const bar =
-    document.getElementById(
-      "rollerScoreBar"
-    );
-
-
-  if (bar) {
-
-    bar.style.width =
-      `${clamp(
-        score || 0,
-        0,
-        100
-      )}%`;
-
-  }
-
-}
-
-
-/* =========================================================
-   52. UPDATE SHOOTING METRICS
-========================================================= */
-
-function updateShootingMetrics(
-  state,
-  angles
-) {
-
-  const stability =
-    calculateTrajectoryStability(
-      state.trajectory
-    );
-
-
-  const consistency =
-    calculateConsistency(
-      state.angleHistory
-    );
-
-
-  setText(
-    "shootingAccuracy",
-    "-"
-  );
-
-
-  setText(
-    "shootingTotalTime",
-    formatTime(
-      state.video?.currentTime ||
-      0
-    )
-  );
-
-
-  setText(
-    "shootingScore",
-    Math.round(
       (
-        stability +
-        consistency
-      ) / 2
-    )
-  );
+        metrics.symmetry +
+        metrics.stability +
+        metrics.consistency
+      ) / 3
 
-}
-
-
-/* =========================================================
-   53. UPDATE SHOOTING SCORE
-========================================================= */
-
-function updateShootingScore(
-  score
-) {
-
-  setText(
-    "shootingScore",
-    score ?? "-"
-  );
-
-
-  const bar =
-    document.getElementById(
-      "shootingScoreBar"
     );
 
-
-  if (bar) {
-
-    bar.style.width =
-      `${clamp(
-        score || 0,
-        0,
-        100
-      )}%`;
-
-  }
+  },
 
 
-  const hits =
-    AnalysisState.shooting.shots
-      .filter(
-        shot =>
-          shot.status === "명중"
-      ).length;
+  /* =======================================================
+     18. REALTIME METRICS UI
+  ======================================================= */
 
-
-  const misses =
-    AnalysisState.shooting.shots
-      .filter(
-        shot =>
-          shot.status === "미스"
-      ).length;
-
-
-  setText(
-    "shootingHits",
-    hits
-  );
-
-
-  setText(
-    "shootingMisses",
-    misses
-  );
-
-
-  if (
-    hits + misses > 0
+  metricsUI(
+    session,
+    angles
   ) {
 
-    setText(
-      "shootingAccuracy",
-      `${Math.round(
-        hits /
-        (hits + misses) *
-        100
-      )}%`
-    );
-
-  }
-
-}
+    const element =
+      document.getElementById(
+        `${session.type}Metrics`
+      );
 
 
-/* =========================================================
-   54. CHART STORAGE
-========================================================= */
-
-const AnalysisCharts = {
-
-  skiAngle: null,
-
-  rollerCycle: null,
-
-  shootingTrigger: null,
-
-  shootingAngle: null
-
-};
+    if (!element) {
+      return;
+    }
 
 
-/* =========================================================
-   55. UPDATE SKI CHART
-========================================================= */
+    const metrics =
+      this.metrics(
+        session
+      );
 
-function updateSkiChart(
-  state
-) {
 
-  if (
-    typeof Chart ===
-    "undefined"
+    const value =
+      number =>
+        Number.isFinite(number)
+          ? `${Math.round(number)}°`
+          : "-";
+
+
+    element.innerHTML = `
+
+      <div class="metric">
+
+        <small>
+          대칭성
+        </small>
+
+        <strong>
+          ${metrics.symmetry}
+        </strong>
+
+      </div>
+
+
+      <div class="metric">
+
+        <small>
+          중심 안정성
+        </small>
+
+        <strong>
+          ${metrics.stability}
+        </strong>
+
+      </div>
+
+
+      <div class="metric">
+
+        <small>
+          동작 일관성
+        </small>
+
+        <strong>
+          ${metrics.consistency}
+        </strong>
+
+      </div>
+
+
+      <div class="metric">
+
+        <small>
+          좌측 무릎
+        </small>
+
+        <strong>
+          ${value(
+            angles.leftKnee
+          )}
+        </strong>
+
+      </div>
+
+
+      <div class="metric">
+
+        <small>
+          우측 무릎
+        </small>
+
+        <strong>
+          ${value(
+            angles.rightKnee
+          )}
+        </strong>
+
+      </div>
+
+
+      <div class="metric">
+
+        <small>
+          좌측 고관절
+        </small>
+
+        <strong>
+          ${value(
+            angles.leftHip
+          )}
+        </strong>
+
+      </div>
+
+    `;
+
+  },
+
+
+  /* =======================================================
+     19. CHART
+  ======================================================= */
+
+  chart(
+    session
   ) {
 
-    return;
-  }
+    if (
+      typeof Chart ===
+      "undefined"
+    ) {
+
+      return;
+
+    }
 
 
-  const canvas =
-    document.getElementById(
-      "skiAngleChart"
-    );
+    const canvas =
+      document.getElementById(
+        `${session.type}Chart`
+      );
 
 
-  if (!canvas) {
-    return;
-  }
+    if (!canvas) {
+      return;
+    }
 
 
-  const data =
-    state.angleHistory
-      .slice(-120);
+    const history =
+      session.angles.slice(
+        -180
+      );
 
 
-  const labels =
-    data.map(
-      item =>
-        Number(
-          item.time
-        ).toFixed(1)
-    );
+    if (
+      this.charts[
+        session.type
+      ]
+    ) {
+
+      this.charts[
+        session.type
+      ].destroy();
+
+    }
 
 
-  const left =
-    data.map(
-      item =>
-        item.leftKnee
-    );
-
-
-  const right =
-    data.map(
-      item =>
-        item.rightKnee
-    );
-
-
-  if (
-    AnalysisCharts.skiAngle
-  ) {
-
-    AnalysisCharts.skiAngle.destroy();
-
-  }
-
-
-  AnalysisCharts.skiAngle =
-    new Chart(
+    this.charts[
+      session.type
+    ] = new Chart(
       canvas,
       {
 
-        type: "line",
+        type:
+          "line",
+
 
         data: {
 
-          labels,
+          labels:
+            history.map(
+              item =>
+                Number(
+                  item.time
+                ).toFixed(1)
+            ),
+
 
           datasets: [
 
             {
+
               label:
                 "좌측 무릎",
 
-              data: left,
+              data:
+                history.map(
+                  item =>
+                    item.leftKnee
+                ),
 
-              borderWidth: 2,
+              pointRadius:
+                0,
 
-              pointRadius: 0,
+              tension:
+                0.25
 
-              tension: 0.3
             },
 
+
             {
+
               label:
                 "우측 무릎",
 
-              data: right,
+              data:
+                history.map(
+                  item =>
+                    item.rightKnee
+                ),
 
-              borderWidth: 2,
+              pointRadius:
+                0,
 
-              pointRadius: 0,
+              tension:
+                0.25
 
-              tension: 0.3
             }
 
           ]
 
         },
 
+
         options: {
 
-          responsive: true,
+          responsive:
+            true,
 
           maintainAspectRatio:
             false,
 
-          animation: false,
+          animation:
+            false,
 
-          plugins: {
+          interaction: {
 
-            legend: {
-              position:
-                "bottom"
-            }
+            intersect:
+              false,
+
+            mode:
+              "index"
 
           },
 
           scales: {
 
-            x: {
-              title: {
-                display: true,
-                text: "시간"
-              }
-            },
-
             y: {
-              title: {
-                display: true,
-                text: "각도(°)"
-              },
 
-              min: 0,
-              max: 180
+              min:
+                0,
+
+              max:
+                180
 
             }
 
@@ -4547,236 +2254,1391 @@ function updateSkiChart(
       }
     );
 
-}
+
+    /*
+     * 중심 궤적 캔버스
+     */
+
+    this.drawTrajectory(
+      session
+    );
+
+  },
 
 
-/* =========================================================
-   56. UPDATE SKI TRAJECTORY
-========================================================= */
+  /* =======================================================
+     20. TRAJECTORY
+  ======================================================= */
 
-function updateSkiTrajectory(
-  state
-) {
-
-  drawTrajectoryCanvas(
-    "skiTrajectoryCanvas",
-    state.trajectory
-  );
-
-}
-
-
-/* =========================================================
-   57. ROLLER CHART
-========================================================= */
-
-function updateRollerChart(
-  state
-) {
-
-  if (
-    typeof Chart ===
-    "undefined"
+  drawTrajectory(
+    session
   ) {
 
-    return;
-  }
-
-
-  const canvas =
-    document.getElementById(
-      "rollerCycleChart"
-    );
-
-
-  if (!canvas) {
-    return;
-  }
-
-
-  const data =
-    state.angleHistory
-      .slice(-120);
-
-
-  const labels =
-    data.map(
-      item =>
-        Number(
-          item.time
-        ).toFixed(1)
-    );
-
-
-  const values =
-    data.map(
-      item =>
-        average([
-          item.leftKnee,
-          item.rightKnee
-        ])
-    );
-
-
-  if (
-    AnalysisCharts.rollerCycle
-  ) {
-
-    AnalysisCharts.rollerCycle
-      .destroy();
-
-  }
-
-
-  AnalysisCharts.rollerCycle =
-    new Chart(
-      canvas,
-      {
-
-        type: "line",
-
-        data: {
-
-          labels,
-
-          datasets: [
-
-            {
-              label:
-                "무릎 평균각",
-
-              data: values,
-
-              borderWidth: 2,
-
-              pointRadius: 0,
-
-              tension: 0.3
-
-            }
-
-          ]
-
-        },
-
-        options: {
-
-          responsive: true,
-
-          maintainAspectRatio:
-            false,
-
-          animation: false,
-
-          plugins: {
-
-            legend: {
-              position:
-                "bottom"
-            }
-
-          }
-
-        }
-
-      }
-    );
-
-
-  drawTrajectoryCanvas(
-    "rollerTrajectoryCanvas",
-    state.trajectory
-  );
-
-}
-
-
-/* =========================================================
-   58. SHOOTING CHARTS
-========================================================= */
-
-function updateShootingCharts(
-  state
-) {
-
-  if (
-    typeof Chart ===
-    "undefined"
-  ) {
-
-    return;
-  }
-
-
-  const triggerCanvas =
-    document.getElementById(
-      "triggerChart"
-    );
-
-
-  const angleCanvas =
-    document.getElementById(
-      "shootingAngleChart"
-    );
-
-
-  if (
-    triggerCanvas
-  ) {
-
-    const triggerLabels =
-      state.triggerData.map(
-        item =>
-          formatTime(
-            item.time
-          )
+    const canvas =
+      document.getElementById(
+        `${session.type}Trajectory`
       );
 
 
-    const triggerValues =
-      state.triggerData.map(
-        item =>
-          item.confidence * 100
+    if (!canvas) {
+      return;
+    }
+
+
+    const rect =
+      canvas.getBoundingClientRect();
+
+
+    const dpr =
+      window.devicePixelRatio ||
+      1;
+
+
+    canvas.width =
+      Math.max(
+        1,
+        rect.width * dpr
       );
+
+
+    canvas.height =
+      Math.max(
+        1,
+        rect.height * dpr
+      );
+
+
+    const ctx =
+      canvas.getContext(
+        "2d"
+      );
+
+
+    ctx.clearRect(
+      0,
+      0,
+      canvas.width,
+      canvas.height
+    );
+
+
+    const points =
+      session.trajectory;
 
 
     if (
-      AnalysisCharts.shootingTrigger
+      points.length < 2
     ) {
 
-      AnalysisCharts
-        .shootingTrigger
-        .destroy();
+      return;
 
     }
 
 
-    AnalysisCharts.shootingTrigger =
+    ctx.beginPath();
+
+
+    points.forEach(
+      (point, index) => {
+
+        const x =
+          point.x *
+          canvas.width;
+
+
+        const y =
+          point.y *
+          canvas.height;
+
+
+        if (
+          index === 0
+        ) {
+
+          ctx.moveTo(
+            x,
+            y
+          );
+
+        } else {
+
+          ctx.lineTo(
+            x,
+            y
+          );
+
+        }
+
+      }
+    );
+
+
+    ctx.strokeStyle =
+      "#315f76";
+
+
+    ctx.lineWidth =
+      2 *
+      dpr;
+
+
+    ctx.stroke();
+
+
+    /*
+     * 시작점
+     */
+
+    const start =
+      points[0];
+
+
+    ctx.beginPath();
+
+    ctx.arc(
+      start.x *
+        canvas.width,
+      start.y *
+        canvas.height,
+      4 * dpr,
+      0,
+      Math.PI * 2
+    );
+
+    ctx.fillStyle =
+      "#315f76";
+
+    ctx.fill();
+
+  },
+
+
+  /* =======================================================
+     21. STEP FRAME
+  ======================================================= */
+
+  step(
+    session,
+    direction
+  ) {
+
+    if (
+      !session.video.src
+    ) {
+
+      UI.toast(
+        "먼저 영상을 선택하세요."
+      );
+
+      return;
+
+    }
+
+
+    session.video.pause();
+
+
+    /*
+     * 일반적인 영상의
+     * 한 프레임 이동
+     */
+
+    const frame =
+      1 /
+      (
+        session.fps ||
+        30
+      );
+
+
+    session.video.currentTime =
+      Math.max(
+        0,
+        Math.min(
+          session.duration || Infinity,
+          session.video.currentTime +
+            frame *
+            direction
+        )
+      );
+
+  },
+
+
+  /* =======================================================
+     22. STOP + SAVE
+  ======================================================= */
+
+  stop(
+    session
+  ) {
+
+    if (
+      !session.video.src
+    ) {
+
+      UI.toast(
+        "분석할 영상이 없습니다."
+      );
+
+      return;
+
+    }
+
+
+    session.running =
+      false;
+
+
+    session.video.pause();
+
+
+    const score =
+      this.score(
+        session
+      );
+
+
+    const metrics =
+      this.metrics(
+        session
+      );
+
+
+    const record = {
+
+      type:
+        session.type,
+
+      typeName:
+        this.typeName(
+          session.type
+        ),
+
+      athleteName:
+        document
+          .getElementById(
+            "athleteNameSide"
+          )
+          ?.textContent ||
+        "선수",
+
+
+      camera:
+        "side",
+
+
+      videoName:
+        session.file ||
+        "영상",
+
+
+      duration:
+        session.duration ||
+        0,
+
+
+      score,
+
+
+      metrics,
+
+
+      angleHistory:
+        session.angles.slice(
+          -600
+        ),
+
+
+      trajectory:
+        session.trajectory.slice(
+          -600
+        ),
+
+
+      feedback:
+        this.feedback(
+          session,
+          score
+        )
+
+    };
+
+
+    const saved =
+      Store.add(
+        record
+      );
+
+
+    /*
+     * 리포트로 이동
+     */
+
+    if (
+      window.Report
+    ) {
+
+      Report.render(
+        saved.id
+      );
+
+    }
+
+
+    UI.go(
+      "report"
+    );
+
+
+    UI.toast(
+      "분석 결과가 저장되었습니다."
+    );
+
+
+    /*
+     * 대시보드 갱신
+     */
+
+    this.refreshDashboard();
+
+  },
+
+
+  /* =======================================================
+     23. TYPE NAME
+  ======================================================= */
+
+  typeName(
+    type
+  ) {
+
+    return {
+
+      ski:
+        "스키",
+
+      roller:
+        "롤러스키",
+
+      shooting:
+        "사격"
+
+    }[type] || type;
+
+  },
+
+
+  /* =======================================================
+     24. FEEDBACK
+  ======================================================= */
+
+  feedback(
+    session,
+    score
+  ) {
+
+    const metrics =
+      this.metrics(
+        session
+      );
+
+
+    const strengths = [];
+
+
+    const improvements = [];
+
+
+    /*
+     * 강점
+     */
+
+    if (
+      metrics.symmetry >= 85
+    ) {
+
+      strengths.push(
+        "좌우 대칭성이 안정적으로 나타났습니다."
+      );
+
+    }
+
+
+    if (
+      metrics.stability >= 85
+    ) {
+
+      strengths.push(
+        "중심 이동이 비교적 안정적입니다."
+      );
+
+    }
+
+
+    if (
+      metrics.consistency >= 85
+    ) {
+
+      strengths.push(
+        "반복 동작의 일관성이 좋습니다."
+      );
+
+    }
+
+
+    /*
+     * 개선
+     */
+
+    if (
+      metrics.symmetry < 85
+    ) {
+
+      improvements.push(
+        "좌우 관절각 차이를 줄이는 데 집중해 보세요."
+      );
+
+    }
+
+
+    if (
+      metrics.stability < 85
+    ) {
+
+      improvements.push(
+        "동작 중 신체 중심의 불필요한 흔들림을 줄여보세요."
+      );
+
+    }
+
+
+    if (
+      metrics.consistency < 85
+    ) {
+
+      improvements.push(
+        "반복 동작에서 동일한 움직임 패턴을 유지해 보세요."
+      );
+
+    }
+
+
+    if (
+      !strengths.length
+    ) {
+
+      strengths.push(
+        "현재 분석 데이터가 기록되었습니다."
+      );
+
+    }
+
+
+    if (
+      !improvements.length
+    ) {
+
+      improvements.push(
+        "현재 지표를 유지하면서 반복 훈련을 진행해 보세요."
+      );
+
+    }
+
+
+    return {
+
+      summary:
+        `${this.typeName(
+          session.type
+        )} 자세 분석 결과입니다.`,
+
+      coach:
+        score >= 85
+          ? "전체적인 자세 지표가 안정적인 편입니다."
+          : score >= 70
+            ? "기본적인 자세는 확인되며 일부 지표의 개선 여지가 있습니다."
+            : "중심 안정성과 동작 일관성을 우선적으로 확인해 보세요.",
+
+      strengths,
+
+      improvements
+
+    };
+
+  },
+
+
+  /* =======================================================
+     25. RECORD LIST
+  ======================================================= */
+
+  renderRecords() {
+
+    const element =
+      document.getElementById(
+        "recordsList"
+      );
+
+
+    if (!element) {
+      return;
+    }
+
+
+    if (
+      !Store.records.length
+    ) {
+
+      element.innerHTML = `
+
+        <div class="empty">
+
+          아직 분석 기록이 없습니다.
+
+        </div>
+
+      `;
+
+
+      return;
+
+    }
+
+
+    element.innerHTML =
+      Store.records
+        .map(
+          record => {
+
+            const date =
+              new Date(
+                record.createdAt
+              )
+                .toLocaleString(
+                  "ko-KR"
+                );
+
+
+            return `
+
+              <div class="record-item">
+
+                <div>
+
+                  <b>
+                    ${record.typeName}
+                  </b>
+
+                  <small>
+                    ${
+                      record.videoName ||
+                      "영상"
+                    }
+                    ·
+                    ${date}
+                  </small>
+
+                </div>
+
+
+                <div>
+
+                  <b>
+                    ${
+                      record.score ??
+                      "-"
+                    }점
+                  </b>
+
+
+                  <button
+                    class="ghost"
+                    onclick="
+                      Report.render('${record.id}');
+                      UI.go('report');
+                    "
+                  >
+                    리포트
+                  </button>
+
+
+                  <button
+                    class="ghost"
+                    onclick="
+                      App.deleteRecord('${record.id}');
+                    "
+                  >
+                    삭제
+                  </button>
+
+                </div>
+
+              </div>
+
+            `;
+
+          }
+        )
+        .join("");
+
+  },
+
+
+  /* =======================================================
+     26. DELETE RECORD
+  ======================================================= */
+
+  deleteRecord(
+    id
+  ) {
+
+    const record =
+      Store.get(
+        id
+      );
+
+
+    if (!record) {
+      return;
+    }
+
+
+    const ok =
+      confirm(
+        `${record.typeName} 기록을 삭제할까요?`
+      );
+
+
+    if (!ok) {
+      return;
+    }
+
+
+    Store.remove(
+      id
+    );
+
+
+    this.renderRecords();
+
+    this.refreshDashboard();
+
+    this.refreshCompare();
+
+
+    UI.toast(
+      "기록을 삭제했습니다."
+    );
+
+  },
+
+
+  /* =======================================================
+     27. DASHBOARD
+  ======================================================= */
+
+  refreshDashboard() {
+
+    const records =
+      Store.records;
+
+
+    const recordsEl =
+      document.getElementById(
+        "dashRecords"
+      );
+
+
+    const scoreEl =
+      document.getElementById(
+        "dashScore"
+      );
+
+
+    const compareEl =
+      document.getElementById(
+        "dashCompare"
+      );
+
+
+    if (recordsEl) {
+
+      recordsEl.textContent =
+        records.length;
+
+    }
+
+
+    if (scoreEl) {
+
+      scoreEl.textContent =
+        records[0]?.score ??
+        "-";
+
+    }
+
+
+    if (compareEl) {
+
+      compareEl.textContent =
+        Math.max(
+          0,
+          records.length - 1
+        );
+
+    }
+
+
+    const recent =
+      document.getElementById(
+        "recentRecords"
+      );
+
+
+    if (!recent) {
+      return;
+    }
+
+
+    if (
+      !records.length
+    ) {
+
+      recent.innerHTML = `
+
+        <div class="empty">
+
+          최근 분석 기록이 없습니다.
+
+        </div>
+
+      `;
+
+
+      return;
+
+    }
+
+
+    recent.innerHTML =
+      records
+        .slice(
+          0,
+          4
+        )
+        .map(
+          record => `
+
+            <div class="record-item">
+
+              <div>
+
+                <b>
+                  ${record.typeName}
+                </b>
+
+                <small>
+                  ${
+                    new Date(
+                      record.createdAt
+                    )
+                      .toLocaleString(
+                        "ko-KR"
+                      )
+                  }
+                </small>
+
+              </div>
+
+              <b>
+                ${record.score ?? "-"}점
+              </b>
+
+            </div>
+
+          `
+        )
+        .join("");
+
+  },
+
+
+  /* =======================================================
+     28. COMPARISON SELECT
+  ======================================================= */
+
+  refreshCompare() {
+
+    const selectA =
+      document.getElementById(
+        "compareA"
+      );
+
+
+    const selectB =
+      document.getElementById(
+        "compareB"
+      );
+
+
+    if (
+      !selectA ||
+      !selectB
+    ) {
+
+      return;
+
+    }
+
+
+    const records =
+      Store.records;
+
+
+    if (
+      !records.length
+    ) {
+
+      selectA.innerHTML =
+        "";
+
+      selectB.innerHTML =
+        "";
+
+      return;
+
+    }
+
+
+    const options =
+      records
+        .map(
+          record => {
+
+            const date =
+              new Date(
+                record.createdAt
+              )
+                .toLocaleString(
+                  "ko-KR"
+                );
+
+
+            return `
+
+              <option
+                value="${record.id}"
+              >
+
+                ${record.typeName}
+                ·
+                ${date}
+                ·
+                ${record.score ?? "-"}점
+
+              </option>
+
+            `;
+
+          }
+        )
+        .join("");
+
+
+    selectA.innerHTML =
+      options;
+
+
+    selectB.innerHTML =
+      options;
+
+
+    if (
+      records.length > 1
+    ) {
+
+      selectB.selectedIndex =
+        1;
+
+    }
+
+  },
+
+
+  /* =======================================================
+     29. RUN COMPARISON
+  ======================================================= */
+
+  runCompare() {
+
+    const a =
+      Store.get(
+        document.getElementById(
+          "compareA"
+        )?.value
+      );
+
+
+    const b =
+      Store.get(
+        document.getElementById(
+          "compareB"
+        )?.value
+      );
+
+
+    if (
+      !a ||
+      !b
+    ) {
+
+      UI.toast(
+        "두 개의 기록을 선택하세요."
+      );
+
+      return;
+
+    }
+
+
+    if (
+      a.id === b.id
+    ) {
+
+      UI.toast(
+        "서로 다른 기록을 선택하세요."
+      );
+
+      return;
+
+    }
+
+
+    const empty =
+      document.getElementById(
+        "compareEmpty"
+      );
+
+
+    const result =
+      document.getElementById(
+        "compareResult"
+      );
+
+
+    empty?.classList.add(
+      "hidden"
+    );
+
+
+    result?.classList.remove(
+      "hidden"
+    );
+
+
+    /*
+     * 점수
+     */
+
+    const scoreA =
+      Number(
+        a.score || 0
+      );
+
+
+    const scoreB =
+      Number(
+        b.score || 0
+      );
+
+
+    const difference =
+      scoreB -
+      scoreA;
+
+
+    document.getElementById(
+      "scoreA"
+    ).textContent =
+      a.score ??
+      "-";
+
+
+    document.getElementById(
+      "scoreB"
+    ).textContent =
+      b.score ??
+      "-";
+
+
+    document.getElementById(
+      "scoreDiff"
+    ).textContent =
+      (
+        difference >= 0
+          ? "+"
+          : ""
+      ) +
+      difference;
+
+
+    /*
+     * 지표
+     */
+
+    const keys = [
+
+      "symmetry",
+
+      "stability",
+
+      "consistency"
+
+    ];
+
+
+    const names = {
+
+      symmetry:
+        "대칭성",
+
+      stability:
+        "중심 안정성",
+
+      consistency:
+        "동작 일관성"
+
+    };
+
+
+    const bars =
+      document.getElementById(
+        "compareBars"
+      );
+
+
+    if (bars) {
+
+      bars.innerHTML =
+        keys
+          .map(
+            key => {
+
+              const valueA =
+                Number(
+                  a.metrics?.[key] ||
+                  0
+                );
+
+
+              const valueB =
+                Number(
+                  b.metrics?.[key] ||
+                  0
+                );
+
+
+              return `
+
+                <div
+                  class="compare-bar"
+                >
+
+                  <div
+                    class="compare-bar-top"
+                  >
+
+                    <span>
+                      ${names[key]}
+                    </span>
+
+                    <b>
+                      ${Math.round(valueA)}
+                      /
+                      ${Math.round(valueB)}
+                    </b>
+
+                  </div>
+
+
+                  <div class="bar">
+
+                    <i
+                      style="
+                        width:
+                        ${Math.max(
+                          0,
+                          Math.min(
+                            100,
+                            valueB
+                          )
+                        )}%;
+                      "
+                    ></i>
+
+                  </div>
+
+                </div>
+
+              `;
+
+            }
+          )
+          .join("");
+
+    }
+
+
+    /*
+     * 비교 그래프
+     */
+
+    this.createComparisonChart(
+      a,
+      b
+    );
+
+
+    /*
+     * 코멘트
+     */
+
+    const comment =
+      document.getElementById(
+        "compareComment"
+      );
+
+
+    if (comment) {
+
+      const changes =
+        keys.map(
+          key => {
+
+            const oldValue =
+              Number(
+                a.metrics?.[key] ||
+                0
+              );
+
+
+            const newValue =
+              Number(
+                b.metrics?.[key] ||
+                0
+              );
+
+
+            return {
+
+              key,
+
+              diff:
+                newValue -
+                oldValue
+
+            };
+
+          }
+        );
+
+
+      const improved =
+        changes
+          .filter(
+            item =>
+              item.diff > 2
+          );
+
+
+      const declined =
+        changes
+          .filter(
+            item =>
+              item.diff < -2
+          );
+
+
+      let html = "";
+
+
+      if (
+        improved.length
+      ) {
+
+        html += `
+
+          <p>
+            <b>개선된 지표</b>:
+            ${
+              improved
+                .map(
+                  item =>
+                    names[
+                      item.key
+                    ]
+                )
+                .join(", ")
+            }
+          </p>
+
+        `;
+
+      }
+
+
+      if (
+        declined.length
+      ) {
+
+        html += `
+
+          <p>
+            <b>확인이 필요한 지표</b>:
+            ${
+              declined
+                .map(
+                  item =>
+                    names[
+                      item.key
+                    ]
+                )
+                .join(", ")
+            }
+          </p>
+
+        `;
+
+      }
+
+
+      if (!html) {
+
+        html = `
+
+          <p>
+            두 기록의 핵심 지표가
+            큰 차이 없이 유지되고 있습니다.
+          </p>
+
+        `;
+
+      }
+
+
+      comment.innerHTML =
+        html;
+
+    }
+
+  },
+
+
+  /* =======================================================
+     30. COMPARISON CHART
+  ======================================================= */
+
+  createComparisonChart(
+    a,
+    b
+  ) {
+
+    if (
+      typeof Chart ===
+      "undefined"
+    ) {
+
+      return;
+
+    }
+
+
+    const canvas =
+      document.getElementById(
+        "compareChart"
+      );
+
+
+    if (!canvas) {
+      return;
+    }
+
+
+    if (
+      this.charts.compare
+    ) {
+
+      this.charts.compare.destroy();
+
+    }
+
+
+    const keys = [
+
+      "symmetry",
+
+      "stability",
+
+      "consistency"
+
+    ];
+
+
+    this.charts.compare =
       new Chart(
-        triggerCanvas,
+        canvas,
         {
 
-          type: "line",
+          type:
+            "bar",
+
 
           data: {
 
-            labels:
-              triggerLabels,
+            labels: [
+
+              "대칭성",
+
+              "중심 안정성",
+
+              "동작 일관성"
+
+            ],
+
 
             datasets: [
 
               {
+
                 label:
-                  "격발 후보 신뢰도",
+                  "A",
 
                 data:
-                  triggerValues,
+                  keys.map(
+                    key =>
+                      Number(
+                        a.metrics?.[key] ||
+                        0
+                      )
+                  )
 
-                borderWidth: 2,
+              },
 
-                pointRadius: 4,
 
-                tension: 0.2
+              {
+
+                label:
+                  "B",
+
+                data:
+                  keys.map(
+                    key =>
+                      Number(
+                        b.metrics?.[key] ||
+                        0
+                      )
+                  )
 
               }
 
@@ -4784,30 +3646,24 @@ function updateShootingCharts(
 
           },
 
+
           options: {
 
-            responsive: true,
+            responsive:
+              true,
 
             maintainAspectRatio:
               false,
-
-            animation: false,
 
             scales: {
 
               y: {
 
-                min: 0,
-                max: 100,
+                min:
+                  0,
 
-                title: {
-
-                  display: true,
-
-                  text:
-                    "신뢰도(%)"
-
-                }
+                max:
+                  100
 
               }
 
@@ -4820,694 +3676,188 @@ function updateShootingCharts(
 
   }
 
-
-  if (
-    angleCanvas
-  ) {
-
-    const data =
-      state.angleHistory
-        .slice(-120);
-
-
-    const labels =
-      data.map(
-        item =>
-          Number(
-            item.time
-          ).toFixed(1)
-      );
-
-
-    const values =
-      data.map(
-        item =>
-          average([
-            item.leftKnee,
-            item.rightKnee
-          ])
-      );
-
-
-    if (
-      AnalysisCharts.shootingAngle
-    ) {
-
-      AnalysisCharts
-        .shootingAngle
-        .destroy();
-
-    }
-
-
-    AnalysisCharts.shootingAngle =
-      new Chart(
-        angleCanvas,
-        {
-
-          type: "line",
-
-          data: {
-
-            labels,
-
-            datasets: [
-
-              {
-                label:
-                  "무릎 평균각",
-
-                data: values,
-
-                borderWidth: 2,
-
-                pointRadius: 0,
-
-                tension: 0.25
-
-              }
-
-            ]
-
-          },
-
-          options: {
-
-            responsive: true,
-
-            maintainAspectRatio:
-              false,
-
-            animation: false
-
-          }
-
-        }
-      );
-
-  }
-
-
-  drawTrajectoryCanvas(
-    "shootingTrajectoryCanvas",
-    state.trajectory
-  );
-
-}
+};
 
 
 /* =========================================================
-   59. TRAJECTORY CANVAS
+   31. CREATE ALL ANALYZERS
 ========================================================= */
 
-function drawTrajectoryCanvas(
-  canvasId,
-  trajectory
-) {
+App.create(
 
-  const canvas =
-    document.getElementById(
-      canvasId
-    );
+  "ski",
 
+  {
 
-  if (!canvas) {
-    return;
-  }
+    video:
+      "skiVideo",
 
+    canvas:
+      "skiCanvas",
 
-  const rect =
-    canvas.getBoundingClientRect();
+    input:
+      "skiInput",
 
+    upload:
+      "skiUpload",
 
-  const width =
-    Math.max(
-      1,
-      Math.round(
-        rect.width
-      )
-    );
+    play:
+      "skiPlay",
 
+    prev:
+      "skiPrev",
 
-  const height =
-    Math.max(
-      1,
-      Math.round(
-        rect.height
-      )
-    );
+    next:
+      "skiNext",
 
+    slow:
+      "skiSlow",
 
-  const dpr =
-    window.devicePixelRatio ||
-    1;
+    normal:
+      "skiNormal",
 
+    seek:
+      "skiSeek",
 
-  canvas.width =
-    width * dpr;
+    start:
+      "skiStart",
 
-  canvas.height =
-    height * dpr;
-
-
-  const ctx =
-    canvas.getContext(
-      "2d"
-    );
-
-
-  ctx.setTransform(
-    dpr,
-    0,
-    0,
-    dpr,
-    0,
-    0
-  );
-
-
-  ctx.clearRect(
-    0,
-    0,
-    width,
-    height
-  );
-
-
-  if (
-    !trajectory ||
-    trajectory.length < 2
-  ) {
-
-    return;
-  }
-
-
-  ctx.beginPath();
-
-
-  trajectory.forEach(
-    (point, index) => {
-
-      const x =
-        point.x *
-        width;
-
-      const y =
-        point.y *
-        height;
-
-
-      if (index === 0) {
-
-        ctx.moveTo(
-          x,
-          y
-        );
-
-      } else {
-
-        ctx.lineTo(
-          x,
-          y
-        );
-
-      }
-
-    }
-  );
-
-
-  ctx.strokeStyle =
-    "#245b78";
-
-  ctx.lineWidth = 2.5;
-
-  ctx.lineJoin =
-    "round";
-
-  ctx.lineCap =
-    "round";
-
-
-  ctx.stroke();
-
-
-  const last =
-    trajectory[
-      trajectory.length - 1
-    ];
-
-
-  if (last) {
-
-    ctx.beginPath();
-
-    ctx.arc(
-      last.x * width,
-      last.y * height,
-      5,
-      0,
-      Math.PI * 2
-    );
-
-
-    ctx.fillStyle =
-      "#163b52";
-
-    ctx.fill();
+    stop:
+      "skiStop"
 
   }
 
-}
+);
 
 
-/* =========================================================
-   60. SAVE ANALYSIS
-========================================================= */
+App.create(
 
-function saveAnalysis(
-  type,
-  state
-) {
+  "roller",
 
-  if (
-    !window.BiathlonEvents
-  ) {
+  {
 
-    return;
-  }
+    video:
+      "rollerVideo",
 
+    canvas:
+      "rollerCanvas",
 
-  const record =
-    BiathlonEvents
-      .createAnalysisRecord({
+    input:
+      "rollerInput",
 
-        type,
+    upload:
+      "rollerUpload",
 
-        camera:
-          state.camera ||
-          "side",
+    play:
+      "rollerPlay",
 
-        shootingMode:
-          type === "shooting"
-            ? state.mode
-            : null,
+    prev:
+      "rollerPrev",
 
-        score:
-          state.score,
+    next:
+      "rollerNext",
 
-        angles:
-          getLatestAngles(
-            state
-          ),
+    slow:
+      "rollerSlow",
 
-        trajectory:
-          state.trajectory
-            .slice(),
+    normal:
+      "rollerNormal",
 
-        keyFrames:
-          state.keyFrames
-            .slice(),
+    seek:
+      "rollerSeek",
 
-        shots:
-          state.shots
-            .slice(),
+    start:
+      "rollerStart",
 
-        triggerData:
-          state.triggerData
-            .slice(),
-
-        metrics:
-          getMetricsForType(
-            type,
-            state
-          ),
-
-        feedback:
-          generateFeedback(
-            type,
-            state
-          ),
-
-        videoName:
-          state.videoFileName ||
-          "",
-
-        videoDuration:
-          state.duration ||
-          0
-
-      });
-
-
-  if (
-    window.ReportSystem
-  ) {
-
-    ReportSystem.setCurrentRecord(
-      record
-    );
+    stop:
+      "rollerStop"
 
   }
 
-}
+);
 
 
-/* =========================================================
-   61. LATEST ANGLES
-========================================================= */
+App.create(
 
-function getLatestAngles(
-  state
-) {
+  "shooting",
 
-  return (
-    state.angleHistory[
-      state.angleHistory.length - 1
-    ] || {}
-  );
+  {
 
-}
+    video:
+      "shootingVideo",
 
+    canvas:
+      "shootingCanvas",
 
-/* =========================================================
-   62. METRICS
-========================================================= */
+    input:
+      "shootingInput",
 
-function getMetricsForType(
-  type,
-  state
-) {
+    upload:
+      "shootingUpload",
 
-  const latest =
-    getLatestAngles(
-      state
-    );
+    play:
+      "shootingPlay",
 
+    prev:
+      "shootingPrev",
 
-  const symmetry =
-    calculateSymmetry(
-      state.angleHistory
-    );
+    next:
+      "shootingNext",
 
+    slow:
+      "shootingSlow",
 
-  const stability =
-    calculateTrajectoryStability(
-      state.trajectory
-    );
+    normal:
+      "shootingNormal",
 
+    seek:
+      "shootingSeek",
 
-  const consistency =
-    calculateConsistency(
-      state.angleHistory
-    );
+    start:
+      "shootingStart",
 
-
-  return {
-
-    symmetry,
-
-    stability,
-
-    consistency,
-
-    leftKnee:
-      latest.leftKnee,
-
-    rightKnee:
-      latest.rightKnee,
-
-    leftHip:
-      latest.leftHip,
-
-    rightHip:
-      latest.rightHip,
-
-    trunk:
-      latest.trunk
-
-  };
-
-}
-
-
-/* =========================================================
-   63. FEEDBACK
-========================================================= */
-
-function generateFeedback(
-  type,
-  state
-) {
-
-  const metrics =
-    getMetricsForType(
-      type,
-      state
-    );
-
-
-  const feedback = {
-
-    summary: "",
-
-    strengths: [],
-
-    improvements: [],
-
-    coach: ""
-
-  };
-
-
-  if (
-    metrics.symmetry >= 85
-  ) {
-
-    feedback.strengths.push(
-      "좌우 자세 대칭성이 안정적입니다."
-    );
-
-  } else {
-
-    feedback.improvements.push(
-      "좌우 움직임의 차이를 줄이는 것이 좋습니다."
-    );
+    stop:
+      "shootingStop"
 
   }
 
-
-  if (
-    metrics.stability >= 85
-  ) {
-
-    feedback.strengths.push(
-      "신체중심의 흔들림이 비교적 안정적입니다."
-    );
-
-  } else {
-
-    feedback.improvements.push(
-      "동작 중 신체중심의 불필요한 흔들림을 줄여보세요."
-    );
-
-  }
-
-
-  if (
-    metrics.consistency >= 85
-  ) {
-
-    feedback.strengths.push(
-      "동작 반복성이 좋습니다."
-    );
-
-  } else {
-
-    feedback.improvements.push(
-      "반복 동작의 일관성을 높이는 훈련이 필요합니다."
-    );
-
-  }
-
-
-  if (type === "shooting") {
-
-    feedback.summary =
-      "사격 자세의 안정성과 격발 전후 움직임을 확인했습니다.";
-
-    feedback.coach =
-      "격발 직전 자세를 일정하게 유지하는 데 집중하세요.";
-
-  } else if (type === "roller") {
-
-    feedback.summary =
-      "롤러스키 추진과 회복 동작의 변화를 분석했습니다.";
-
-    feedback.coach =
-      "좌우 추진의 리듬과 중심 이동을 일정하게 유지해보세요.";
-
-  } else {
-
-    feedback.summary =
-      "스키 동작 중 관절각과 중심 궤적을 분석했습니다.";
-
-    feedback.coach =
-      "추진 구간에서 중심 이동과 하체 각도의 일관성을 확인해보세요.";
-
-  }
-
-
-  return feedback;
-
-}
-
-
-/* =========================================================
-   64. TEXT
-========================================================= */
-
-function setText(
-  id,
-  value
-) {
-
-  const element =
-    document.getElementById(
-      id
-    );
-
-
-  if (element) {
-
-    element.textContent =
-      value;
-
-  }
-
-}
-
-
-/* =========================================================
-   65. REPORT BUTTON
-========================================================= */
-
-document.addEventListener(
-  "click",
-  event => {
-
-    const button =
-      event.target.closest(
-        "[data-report-type]"
-      );
-
-
-    if (!button) {
-      return;
-    }
-
-
-    const type =
-      button.dataset.reportType;
-
-
-    if (
-      window.ReportSystem
-    ) {
-
-      ReportSystem.open(
-        type
-      );
-
-    }
-
-
-    if (
-      window.BiathlonEvents
-    ) {
-
-      BiathlonEvents.changePage(
-        "report"
-      );
-
-    }
-
-  }
 );
 
 
 /* =========================================================
-   66. WINDOW RESIZE
+   32. COMPARE BUTTON
 ========================================================= */
 
-window.addEventListener(
-  "resize",
-  () => {
+document
+  .getElementById(
+    "runCompare"
+  )
+  ?.addEventListener(
+    "click",
+    () => {
 
-    drawTrajectoryCanvas(
-      "skiTrajectoryCanvas",
-      AnalysisState.ski.trajectory
-    );
+      App.runCompare();
 
-
-    drawTrajectoryCanvas(
-      "rollerTrajectoryCanvas",
-      AnalysisState.roller.trajectory
-    );
-
-
-    drawTrajectoryCanvas(
-      "shootingTrajectoryCanvas",
-      AnalysisState.shooting.trajectory
-    );
-
-  }
-);
-
-
-/* =========================================================
-   67. INIT
-========================================================= */
-
-function initBiathlonApp() {
-
-  initSkiAnalysis();
-
-  initRollerAnalysis();
-
-  initShootingAnalysis();
-
-
-  if (
-    window.BiathlonEvents
-  ) {
-
-    BiathlonEvents.showToast(
-      "설천 바이애슬론 분석 시스템 준비 완료"
-    );
-
-  }
-
-}
-
-
-/* =========================================================
-   68. START
-========================================================= */
-
-if (
-  document.readyState ===
-  "loading"
-) {
-
-  document.addEventListener(
-    "DOMContentLoaded",
-    initBiathlonApp
+    }
   );
 
-} else {
 
-  initBiathlonApp();
+/* =========================================================
+   33. INITIAL DASHBOARD
+========================================================= */
 
-}
+App.refreshDashboard();
+
+
+/* =========================================================
+   34. INITIAL RECORD LIST
+========================================================= */
+
+App.renderRecords();
+
+
+/* =========================================================
+   35. INITIAL COMPARISON
+========================================================= */
+
+App.refreshCompare();
