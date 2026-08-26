@@ -1,1799 +1,1139 @@
 /* =========================================================
-   설천 바이애슬론 자세분석 PRO
+   설천 BIATHLON PERFORMANCE CENTER PRO
    report.js
+
+   기능
    ---------------------------------------------------------
-   리포트 시스템
    - 스키 리포트
    - 롤러스키 리포트
-   - 사격 리포트
-   - 격발 그래프
+   - 사격 자세 리포트
+   - 점수
+   - 핵심 지표
+   - 관절각 변화 그래프
    - 중심 궤적
-   - 관절각
-   - 5발 분석
-   - 핵심 프레임
-   - 자동 코칭
+   - 자동 분석 코멘트
    - 인쇄 / PDF 저장
 ========================================================= */
 
 
-/* =========================================================
-   01. REPORT STATE
-========================================================= */
+const Report = {
 
-const ReportState = {
+  charts: {},
 
-  currentRecord: null,
 
-  currentType: "ski",
+  /* =======================================================
+     01. REPORT RENDER
+  ======================================================= */
 
-  charts: {
-    angle: null,
-    trajectory: null,
-    trigger: null,
-    stability: null
-  }
+  render(id = null) {
 
-};
+    const container =
+      document.getElementById(
+        "reportContainer"
+      );
 
 
-/* =========================================================
-   02. TYPE INFORMATION
-========================================================= */
+    const selector =
+      document.getElementById(
+        "reportSelect"
+      );
 
-const REPORT_TYPES = {
 
-  ski: {
+    if (!container) {
+      return;
+    }
 
-    title:
-      "바이애슬론 스키 자세분석 리포트",
 
-    subtitle:
-      "SKI TECHNIQUE ANALYSIS",
+    /*
+     * 선택된 기록
+     */
 
-    icon:
-      "🎿"
+    const record =
+      Store.get(id) ||
+      Store.records[0] ||
+      null;
 
-  },
 
+    if (!record) {
 
-  roller: {
+      container.innerHTML = `
 
-    title:
-      "바이애슬론 롤러스키 자세분석 리포트",
+        <div class="report-empty">
 
-    subtitle:
-      "ROLLER SKI TECHNIQUE ANALYSIS",
+          <h3>
+            분석 기록이 없습니다.
+          </h3>
 
-    icon:
-      "🛼"
+          <p>
+            스키, 롤러스키 또는 사격 자세분석을
+            먼저 실행해주세요.
+          </p>
 
-  },
+        </div>
 
+      `;
 
-  shooting: {
 
-    title:
-      "바이애슬론 사격 자세분석 리포트",
+      if (selector) {
 
-    subtitle:
-      "SHOOTING TECHNIQUE ANALYSIS",
+        selector.innerHTML =
+          "";
 
-    icon:
-      "🎯"
-
-  }
-
-};
-
-
-/* =========================================================
-   03. SET CURRENT RECORD
-========================================================= */
-
-function setCurrentRecord(
-  record
-) {
-
-  if (!record) {
-    return;
-  }
-
-
-  ReportState.currentRecord =
-    record;
-
-
-  ReportState.currentType =
-    record.type ||
-    "ski";
-
-
-  renderReport();
-
-}
-
-
-/* =========================================================
-   04. GET CURRENT RECORD
-========================================================= */
-
-function getCurrentRecord() {
-
-  if (
-    ReportState.currentRecord
-  ) {
-
-    return ReportState.currentRecord;
-
-  }
-
-
-  if (
-    window.BiathlonStore &&
-    BiathlonStore.currentRecordId
-  ) {
-
-    return BiathlonStore.records.find(
-      record =>
-        record.id ===
-        BiathlonStore.currentRecordId
-    ) || null;
-
-  }
-
-
-  return null;
-
-}
-
-
-/* =========================================================
-   05. OPEN REPORT
-========================================================= */
-
-function openReport(
-  type,
-  recordId = null
-) {
-
-  ReportState.currentType =
-    type || "ski";
-
-
-  if (
-    recordId &&
-    window.BiathlonStore
-  ) {
-
-    ReportState.currentRecord =
-      BiathlonStore.records.find(
-        record =>
-          record.id === recordId
-      ) || null;
-
-  }
-
-
-  if (
-    !ReportState.currentRecord &&
-    window.BiathlonStore
-  ) {
-
-    ReportState.currentRecord =
-      BiathlonStore.records.find(
-        record =>
-          record.type ===
-          ReportState.currentType
-      ) || null;
-
-  }
-
-
-  renderReport();
-
-}
-
-
-/* =========================================================
-   06. RENDER REPORT
-========================================================= */
-
-function renderReport() {
-
-  const record =
-    getCurrentRecord();
-
-
-  const container =
-    document.getElementById(
-      "reportContainer"
-    );
-
-
-  if (!container) {
-    return;
-  }
-
-
-  if (!record) {
-
-    renderEmptyReport(
-      container
-    );
-
-    return;
-  }
-
-
-  const type =
-    REPORT_TYPES[
-      record.type
-    ] ||
-    REPORT_TYPES.ski;
-
-
-  container.innerHTML = `
-
-    <div class="report-document">
-
-      ${renderReportHeader(
-        record,
-        type
-      )}
-
-      ${renderAthleteSummary(
-        record
-      )}
-
-      ${renderScoreSection(
-        record
-      )}
-
-      ${
-        record.type === "shooting"
-          ? renderShootingReport(
-              record
-            )
-          : record.type === "roller"
-            ? renderRollerReport(
-                record
-              )
-            : renderSkiReport(
-                record
-              )
       }
 
-      ${renderFeedbackSection(
-        record
-      )}
 
-      ${renderReportFooter(
-        record
-      )}
+      return;
 
-    </div>
-
-  `;
+    }
 
 
-  renderReportCharts(
-    record
-  );
-
-}
+    Store.current =
+      record.id;
 
 
-/* =========================================================
-   07. EMPTY REPORT
-========================================================= */
+    /*
+     * 리포트 선택 메뉴
+     */
 
-function renderEmptyReport(
-  container
-) {
-
-  container.innerHTML = `
-
-    <div class="report-empty">
-
-      <div class="report-empty-icon">
-        📊
-      </div>
-
-      <h2>
-        분석 리포트
-      </h2>
-
-      <p>
-        먼저 자세분석을 완료하면
-        분석 결과가 이곳에 표시됩니다.
-      </p>
-
-    </div>
-
-  `;
-
-}
+    this.updateSelector(
+      selector,
+      record.id
+    );
 
 
-/* =========================================================
-   08. REPORT HEADER
-========================================================= */
+    /*
+     * 리포트 종류
+     */
 
-function renderReportHeader(
-  record,
-  type
-) {
-
-  return `
-
-    <div class="report-header">
-
-      <div class="report-brand">
-
-        <div class="report-logo">
-          ${type.icon}
-        </div>
-
-        <div>
-
-          <div class="report-brand-name">
-            설천
-          </div>
-
-          <div class="report-brand-sub">
-            BIATHLON PERFORMANCE ANALYSIS
-          </div>
-
-        </div>
-
-      </div>
+    const type =
+      record.typeName ||
+      this.typeName(
+        record.type
+      );
 
 
-      <div class="report-title">
+    /*
+     * 지표
+     */
 
-        <h1>
-          ${type.title}
-        </h1>
-
-        <span>
-          ${type.subtitle}
-        </span>
-
-      </div>
+    const metrics =
+      record.metrics ||
+      {};
 
 
-      <div class="report-date">
+    /*
+     * 날짜
+     */
 
-        ${escapeReportHtml(
-          record.date ||
-          formatReportDate(
+    const created =
+      record.createdAt
+        ? new Date(
             record.createdAt
+          ).toLocaleString(
+            "ko-KR"
           )
-        )}
+        : "-";
 
-      </div>
 
-    </div>
+    /*
+     * 리포트 내용
+     */
 
-  `;
+    container.innerHTML = `
 
-}
+      <article
+        class="report-document"
+      >
 
 
-/* =========================================================
-   09. ATHLETE SUMMARY
-========================================================= */
-
-function renderAthleteSummary(
-  record
-) {
-
-  return `
-
-    <section
-      class="report-section
-             athlete-summary"
-    >
-
-      <div class="section-heading">
-
-        <span>
-          01
-        </span>
-
-        <h2>
-          선수 정보
-        </h2>
-
-      </div>
-
-
-      <div class="athlete-report-grid">
-
-        <div class="report-info-card">
-
-          <span>
-            선수명
-          </span>
-
-          <strong>
-            ${escapeReportHtml(
-              record.athleteName ||
-              "선수 미등록"
-            )}
-          </strong>
-
-        </div>
-
-
-        <div class="report-info-card">
-
-          <span>
-            분석 종목
-          </span>
-
-          <strong>
-            ${escapeReportHtml(
-              record.typeName ||
-              getReportTypeName(
-                record.type
-              )
-            )}
-          </strong>
-
-        </div>
-
-
-        <div class="report-info-card">
-
-          <span>
-            분석 카메라
-          </span>
-
-          <strong>
-            ${getReportCameraName(
-              record.camera
-            )}
-          </strong>
-
-        </div>
-
-
-        <div class="report-info-card">
-
-          <span>
-            분석 영상
-          </span>
-
-          <strong>
-            ${escapeReportHtml(
-              record.videoName ||
-              "영상 기록"
-            )}
-          </strong>
-
-        </div>
-
-
-        ${
-          record.shootingMode
-            ? `
-
-              <div class="report-info-card">
-
-                <span>
-                  사격 자세
-                </span>
-
-                <strong>
-                  ${getReportShootingMode(
-                    record.shootingMode
-                  )}
-                </strong>
-
-              </div>
-
-            `
-            : ""
-        }
-
-      </div>
-
-    </section>
-
-  `;
-
-}
-
-
-/* =========================================================
-   10. SCORE
-========================================================= */
-
-function renderScoreSection(
-  record
-) {
-
-  const score =
-    Number.isFinite(
-      Number(record.score)
-    )
-      ? Math.round(
-          Number(record.score)
-        )
-      : "-";
-
-
-  return `
-
-    <section
-      class="report-section
-             report-score-section"
-    >
-
-      <div class="section-heading">
-
-        <span>
-          02
-        </span>
-
-        <h2>
-          종합 분석 점수
-        </h2>
-
-      </div>
-
-
-      <div class="report-score-layout">
-
-        <div class="report-score-main">
-
-          <div class="report-score-number">
-            ${score}
-          </div>
-
-          <div class="report-score-label">
-            PERFORMANCE SCORE
-          </div>
-
-        </div>
-
-
-        <div class="report-score-bars">
-
-          ${renderMetricBar(
-            "좌우 대칭성",
-            record.metrics?.symmetry
-          )}
-
-          ${renderMetricBar(
-            "중심 안정성",
-            record.metrics?.stability
-          )}
-
-          ${renderMetricBar(
-            "동작 일관성",
-            record.metrics?.consistency
-          )}
-
-        </div>
-
-      </div>
-
-    </section>
-
-  `;
-
-}
-
-
-/* =========================================================
-   11. METRIC BAR
-========================================================= */
-
-function renderMetricBar(
-  name,
-  value
-) {
-
-  const score =
-    Number.isFinite(
-      Number(value)
-    )
-      ? Math.round(
-          Number(value)
-        )
-      : 0;
-
-
-  return `
-
-    <div class="report-metric">
-
-      <div class="report-metric-top">
-
-        <span>
-          ${name}
-        </span>
-
-        <strong>
-          ${score}
-        </strong>
-
-      </div>
-
-
-      <div class="report-metric-track">
+        <!-- =========================================
+             HEADER
+        ========================================== -->
 
         <div
-          class="report-metric-fill"
-          style="width:${clampReport(
-            score,
-            0,
-            100
-          )}%"
-        ></div>
+          class="report-header"
+        >
 
-      </div>
+          <div>
 
-    </div>
+            <span class="eyebrow">
+              SEOLCHEON BIATHLON
+            </span>
 
-  `;
+            <h2>
+              ${type}
+              자세분석 리포트
+            </h2>
 
-}
+            <small>
+              ${created}
+            </small>
 
+          </div>
 
-/* =========================================================
-   12. SKI REPORT
-========================================================= */
-
-function renderSkiReport(
-  record
-) {
-
-  return `
-
-    <section
-      class="report-section"
-    >
-
-      <div class="section-heading">
-
-        <span>
-          03
-        </span>
-
-        <h2>
-          스키 자세분석
-        </h2>
-
-      </div>
-
-
-      <div class="report-two-column">
-
-        <div>
-
-          <h3>
-            관절각 분석
-          </h3>
 
           <div
-            class="report-angle-grid"
+            class="report-score"
+          >
+            ${this.number(
+              record.score
+            )}
+          </div>
+
+        </div>
+
+
+
+        <!-- =========================================
+             ATHLETE
+        ========================================== -->
+
+        <div
+          class="report-section"
+        >
+
+          <h3>
+            선수 정보
+          </h3>
+
+
+          <div
+            class="report-grid"
           >
 
-            ${renderAngleCard(
-              "좌측 무릎",
-              record.metrics?.leftKnee
-            )}
+            <div
+              class="report-card"
+            >
 
-            ${renderAngleCard(
-              "우측 무릎",
-              record.metrics?.rightKnee
-            )}
+              <small>
+                선수
+              </small>
 
-            ${renderAngleCard(
-              "좌측 고관절",
-              record.metrics?.leftHip
-            )}
+              <strong>
+                ${
+                  record.athleteName ||
+                  "-"
+                }
+              </strong>
 
-            ${renderAngleCard(
-              "우측 고관절",
-              record.metrics?.rightHip
-            )}
+            </div>
 
-            ${renderAngleCard(
-              "상체 각도",
-              record.metrics?.trunk
-            )}
+
+            <div
+              class="report-card"
+            >
+
+              <small>
+                분석 종목
+              </small>
+
+              <strong>
+                ${type}
+              </strong>
+
+            </div>
+
+
+            <div
+              class="report-card"
+            >
+
+              <small>
+                분석 영상
+              </small>
+
+              <strong>
+                ${
+                  record.videoName ||
+                  "-"
+                }
+              </strong>
+
+            </div>
+
+
+            <div
+              class="report-card"
+            >
+
+              <small>
+                영상 길이
+              </small>
+
+              <strong>
+                ${this.duration(
+                  record.duration
+                )}
+              </strong>
+
+            </div>
 
           </div>
 
         </div>
 
 
-        <div>
+
+        <!-- =========================================
+             CORE METRICS
+        ========================================== -->
+
+        <div
+          class="report-section"
+        >
 
           <h3>
-            중심 궤적
+            핵심 분석 지표
           </h3>
 
-          <div class="report-chart-box">
+
+          <div
+            class="report-grid"
+          >
+
+            <div
+              class="report-card"
+            >
+
+              <small>
+                좌우 대칭성
+              </small>
+
+              <strong>
+                ${this.number(
+                  metrics.symmetry
+                )}
+              </strong>
+
+            </div>
+
+
+            <div
+              class="report-card"
+            >
+
+              <small>
+                중심 안정성
+              </small>
+
+              <strong>
+                ${this.number(
+                  metrics.stability
+                )}
+              </strong>
+
+            </div>
+
+
+            <div
+              class="report-card"
+            >
+
+              <small>
+                동작 일관성
+              </small>
+
+              <strong>
+                ${this.number(
+                  metrics.consistency
+                )}
+              </strong>
+
+            </div>
+
+
+            <div
+              class="report-card"
+            >
+
+              <small>
+                평균 무릎각
+              </small>
+
+              <strong>
+                ${
+                  Number.isFinite(
+                    Number(
+                      metrics.kneeMean
+                    )
+                  )
+                    ? Math.round(
+                        metrics.kneeMean
+                      ) + "°"
+                    : "-"
+                }
+              </strong>
+
+            </div>
+
+          </div>
+
+        </div>
+
+
+
+        <!-- =========================================
+             ANGLE GRAPH
+        ========================================== -->
+
+        <div
+          class="report-section"
+        >
+
+          <h3>
+            관절각 변화
+          </h3>
+
+
+          <div
+            class="chart-box large"
+          >
 
             <canvas
-              id="reportTrajectoryChart"
+              id="reportAngle"
             ></canvas>
 
           </div>
 
         </div>
 
-      </div>
 
 
-      <div class="report-chart-wide">
+        <!-- =========================================
+             CENTER TRAJECTORY
+        ========================================== -->
 
-        <h3>
-          무릎각 변화
-        </h3>
+        <div
+          class="report-section"
+        >
 
-        <div class="report-chart-box">
-
-          <canvas
-            id="reportAngleChart"
-          ></canvas>
-
-        </div>
-
-      </div>
+          <h3>
+            신체중심 궤적
+          </h3>
 
 
-      ${renderKeyFrames(
-        record
-      )}
+          <div
+            class="chart-box large"
+          >
 
-    </section>
+            <canvas
+              id="reportTrajectory"
+            ></canvas>
 
-  `;
-
-}
-
-
-/* =========================================================
-   13. ROLLER REPORT
-========================================================= */
-
-function renderRollerReport(
-  record
-) {
-
-  return `
-
-    <section
-      class="report-section"
-    >
-
-      <div class="section-heading">
-
-        <span>
-          03
-        </span>
-
-        <h2>
-          롤러스키 자세분석
-        </h2>
-
-      </div>
-
-
-      <div class="report-analysis-grid">
-
-        ${renderMetricCard(
-          "좌우 대칭성",
-          record.metrics?.symmetry
-        )}
-
-        ${renderMetricCard(
-          "중심 안정성",
-          record.metrics?.stability
-        )}
-
-        ${renderMetricCard(
-          "동작 일관성",
-          record.metrics?.consistency
-        )}
-
-        ${renderMetricCard(
-          "좌측 무릎",
-          record.metrics?.leftKnee,
-          "°"
-        )}
-
-        ${renderMetricCard(
-          "우측 무릎",
-          record.metrics?.rightKnee,
-          "°"
-        )}
-
-      </div>
-
-
-      <div class="report-chart-wide">
-
-        <h3>
-          추진 / 회복 동작 변화
-        </h3>
-
-        <div class="report-chart-box">
-
-          <canvas
-            id="reportAngleChart"
-          ></canvas>
+          </div>
 
         </div>
 
-      </div>
 
 
-      <div class="report-chart-wide">
+        <!-- =========================================
+             ANGLE TABLE
+        ========================================== -->
 
-        <h3>
-          신체중심 궤적
-        </h3>
+        <div
+          class="report-section"
+        >
 
-        <div class="report-chart-box">
-
-          <canvas
-            id="reportTrajectoryChart"
-          ></canvas>
-
-        </div>
-
-      </div>
+          <h3>
+            주요 관절각
+          </h3>
 
 
-      ${renderKeyFrames(
-        record
-      )}
+          <div
+            class="report-grid"
+          >
 
-    </section>
+            ${this.angleCard(
+              "좌측 무릎",
+              metrics.leftKnee
+            )}
 
-  `;
+            ${this.angleCard(
+              "우측 무릎",
+              metrics.rightKnee
+            )}
 
-}
+            ${this.angleCard(
+              "좌측 고관절",
+              metrics.leftHip
+            )}
 
+            ${this.angleCard(
+              "우측 고관절",
+              metrics.rightHip
+            )}
 
-/* =========================================================
-   14. SHOOTING REPORT
-========================================================= */
-
-function renderShootingReport(
-  record
-) {
-
-  const shots =
-    Array.isArray(
-      record.shots
-    )
-      ? record.shots
-      : [];
-
-
-  return `
-
-    <section
-      class="report-section
-             shooting-report"
-    >
-
-      <div class="section-heading">
-
-        <span>
-          03
-        </span>
-
-        <h2>
-          사격 자세분석
-        </h2>
-
-      </div>
-
-
-      <div
-        class="shooting-report-alert"
-      >
-
-        <strong>
-          사격 분석 안내
-        </strong>
-
-        <p>
-          영상 기반으로 추정된 격발 후보와
-          신체 움직임을 표시합니다.
-          실제 격발 여부는 영상과 기록을
-          함께 확인해야 합니다.
-        </p>
-
-      </div>
-
-
-      <div class="report-analysis-grid">
-
-        ${renderMetricCard(
-          "종합 안정성",
-          record.metrics?.stability
-        )}
-
-        ${renderMetricCard(
-          "자세 일관성",
-          record.metrics?.consistency
-        )}
-
-        ${renderMetricCard(
-          "좌우 대칭성",
-          record.metrics?.symmetry
-        )}
-
-        ${renderMetricCard(
-          "무릎 평균각",
-          averageReportAngles(
-            record.metrics
-          ),
-          "°"
-        )}
-
-      </div>
-
-
-      <div class="report-chart-wide">
-
-        <h3>
-          격발 후보 변화 그래프
-        </h3>
-
-        <div class="report-chart-box">
-
-          <canvas
-            id="reportTriggerChart"
-          ></canvas>
+          </div>
 
         </div>
 
-      </div>
 
 
-      <div class="report-chart-wide">
+        <!-- =========================================
+             COACH FEEDBACK
+        ========================================== -->
 
-        <h3>
-          신체중심 궤적 변화
-        </h3>
+        <div
+          class="report-section"
+        >
 
-        <div class="report-chart-box">
-
-          <canvas
-            id="reportTrajectoryChart"
-          ></canvas>
-
-        </div>
-
-      </div>
+          <h3>
+            분석 코멘트
+          </h3>
 
 
-      <div class="report-chart-wide">
+          <div
+            class="feedback"
+          >
 
-        <h3>
-          격발 전후 자세 변화
-        </h3>
-
-        <div class="report-chart-box">
-
-          <canvas
-            id="reportAngleChart"
-          ></canvas>
-
-        </div>
-
-      </div>
+            <b>
+              ${
+                record.feedback?.summary ||
+                `${type} 자세 분석 결과입니다.`
+              }
+            </b>
 
 
-      <div class="report-section-inner">
-
-        <h3>
-          5발 사격 분석
-        </h3>
-
-
-        <div class="shot-report-grid">
-
-          ${renderShotReportCards(
-            shots
-          )}
-
-        </div>
-
-      </div>
+            <p>
+              ${
+                record.feedback?.coach ||
+                "분석 데이터가 기록되었습니다."
+              }
+            </p>
 
 
-      ${renderKeyFrames(
-        record
-      )}
-
-    </section>
-
-  `;
-
-}
-
-
-/* =========================================================
-   15. SHOT CARDS
-========================================================= */
-
-function renderShotReportCards(
-  shots
-) {
-
-  const cards = [];
-
-
-  for (
-    let i = 1;
-    i <= 5;
-    i++
-  ) {
-
-    const shot =
-      shots.find(
-        item =>
-          Number(
-            item.number
-          ) === i
-      );
-
-
-    cards.push(`
-
-      <div class="shot-report-card">
-
-        <div class="shot-report-number">
-          ${i}
-        </div>
-
-
-        <div class="shot-report-info">
-
-          <span>
-            격발 후보
-          </span>
-
-          <strong>
             ${
-              shot
-                ? formatReportTime(
-                    shot.time
-                  )
-                : "-"
-            }
-          </strong>
-
-        </div>
-
-
-        <div class="shot-report-info">
-
-          <span>
-            간격
-          </span>
-
-          <strong>
-            ${
-              shot &&
-              Number.isFinite(
-                Number(
-                  shot.interval
-                )
+              this.feedbackList(
+                "강점",
+                record.feedback?.strengths
               )
-                ? `${Number(
-                    shot.interval
-                  ).toFixed(2)}초`
-                : "-"
             }
-          </strong>
+
+
+            ${
+              this.feedbackList(
+                "개선 포인트",
+                record.feedback?.improvements
+              )
+            }
+
+          </div>
 
         </div>
 
 
-        <div class="shot-report-status">
 
-          ${
-            shot?.status ||
-            "분석 필요"
-          }
+        <!-- =========================================
+             FOOTER
+        ========================================== -->
 
-        </div>
+        <div
+          class="report-footer"
+        >
 
-      </div>
+          <span>
+            설천 Biathlon Performance Center
+          </span>
 
-    `);
-
-  }
-
-
-  return cards.join("");
-
-}
-
-
-/* =========================================================
-   16. KEY FRAMES
-========================================================= */
-
-function renderKeyFrames(
-  record
-) {
-
-  const frames =
-    Array.isArray(
-      record.keyFrames
-    )
-      ? record.keyFrames
-      : [];
-
-
-  return `
-
-    <div class="report-section-inner">
-
-      <h3>
-        핵심 자세 프레임
-      </h3>
-
-
-      ${
-        frames.length
-          ? `
-
-            <div
-              class="report-key-frame-grid"
-            >
-
-              ${frames
-                .slice(0, 6)
-                .map(
-                  (frame, index) => `
-
-                    <div
-                      class="report-key-frame"
-                    >
-
-                      <div
-                        class="report-frame-placeholder"
-                      >
-                        FRAME
-                        ${index + 1}
-                      </div>
-
-                      <div
-                        class="report-frame-meta"
-                      >
-
-                        <span>
-                          ${formatReportTime(
-                            frame.time
-                          )}
-                        </span>
-
-                        <strong>
-                          ${Math.round(
-                            frame.quality ||
-                            0
-                          )}점
-                        </strong>
-
-                      </div>
-
-                    </div>
-
-                  `
-                )
-                .join("")}
-
-            </div>
-
-          `
-          : `
-
-            <div class="report-empty-small">
-              분석 중 자동으로 핵심 프레임이 생성됩니다.
-            </div>
-
-          `
-      }
-
-    </div>
-
-  `;
-
-}
-
-
-/* =========================================================
-   17. ANGLE CARD
-========================================================= */
-
-function renderAngleCard(
-  name,
-  value
-) {
-
-  return `
-
-    <div class="report-angle-card">
-
-      <span>
-        ${name}
-      </span>
-
-      <strong>
-        ${
-          Number.isFinite(
-            Number(value)
-          )
-            ? `${Math.round(
-                Number(value)
-              )}°`
-            : "-"
-        }
-      </strong>
-
-    </div>
-
-  `;
-
-}
-
-
-/* =========================================================
-   18. METRIC CARD
-========================================================= */
-
-function renderMetricCard(
-  name,
-  value,
-  suffix = ""
-) {
-
-  const number =
-    Number.isFinite(
-      Number(value)
-    )
-      ? Math.round(
-          Number(value)
-        )
-      : null;
-
-
-  return `
-
-    <div class="report-analysis-card">
-
-      <span>
-        ${name}
-      </span>
-
-      <strong>
-        ${
-          number !== null
-            ? `${number}${suffix}`
-            : "-"
-        }
-      </strong>
-
-    </div>
-
-  `;
-
-}
-
-
-/* =========================================================
-   19. FEEDBACK
-========================================================= */
-
-function renderFeedbackSection(
-  record
-) {
-
-  const feedback =
-    record.feedback ||
-    {};
-
-
-  const strengths =
-    Array.isArray(
-      feedback.strengths
-    )
-      ? feedback.strengths
-      : [];
-
-
-  const improvements =
-    Array.isArray(
-      feedback.improvements
-    )
-      ? feedback.improvements
-      : [];
-
-
-  return `
-
-    <section
-      class="report-section
-             report-feedback"
-    >
-
-      <div class="section-heading">
-
-        <span>
-          04
-        </span>
-
-        <h2>
-          코치 분석
-        </h2>
-
-      </div>
-
-
-      <div class="report-summary-box">
-
-        <strong>
-          ${escapeReportHtml(
-            feedback.summary ||
-            "분석 결과를 바탕으로 자세를 확인하세요."
-          )}
-        </strong>
-
-        <p>
-          ${escapeReportHtml(
-            feedback.coach ||
-            "분석 데이터를 참고하여 다음 훈련을 계획하세요."
-          )}
-        </p>
-
-      </div>
-
-
-      <div class="feedback-columns">
-
-        <div class="feedback-box">
-
-          <h3>
-            잘된 점
-          </h3>
-
-          ${
-            strengths.length
-              ? `
-
-                <ul>
-
-                  ${strengths
-                    .map(
-                      item =>
-                        `<li>
-                          ${escapeReportHtml(
-                            item
-                          )}
-                        </li>`
-                    )
-                    .join("")}
-
-                </ul>
-
-              `
-              : `
-                <p>
-                  분석 데이터가 누적되면
-                  강점이 표시됩니다.
-                </p>
-              `
-          }
+          <span>
+            자세분석 PRO
+          </span>
 
         </div>
 
 
-        <div class="feedback-box">
+      </article>
 
-          <h3>
-            개선 포인트
-          </h3>
-
-          ${
-            improvements.length
-              ? `
-
-                <ul>
-
-                  ${improvements
-                    .map(
-                      item =>
-                        `<li>
-                          ${escapeReportHtml(
-                            item
-                          )}
-                        </li>`
-                    )
-                    .join("")}
-
-                </ul>
-
-              `
-              : `
-                <p>
-                  현재 큰 개선 포인트가 없습니다.
-                </p>
-              `
-          }
-
-        </div>
-
-      </div>
-
-    </section>
-
-  `;
-
-}
+    `;
 
 
-/* =========================================================
-   20. FOOTER
-========================================================= */
+    /*
+     * 그래프
+     */
 
-function renderReportFooter(
-  record
-) {
+    requestAnimationFrame(
+      () => {
 
-  return `
-
-    <div class="report-footer">
-
-      <div>
-        설천 바이애슬론 자세분석 PRO
-      </div>
-
-      <div>
-        ${escapeReportHtml(
-          record.athleteName ||
-          "Athlete"
-        )}
-      </div>
-
-    </div>
-
-  `;
-
-}
+        this.drawAngleChart(
+          record
+        );
 
 
-/* =========================================================
-   21. REPORT CHARTS
-========================================================= */
-
-function renderReportCharts(
-  record
-) {
-
-  if (
-    typeof Chart ===
-    "undefined"
-  ) {
-
-    return;
-  }
-
-
-  setTimeout(
-    () => {
-
-      if (
-        record.type ===
-        "shooting"
-      ) {
-
-        createReportTriggerChart(
+        this.drawTrajectory(
           record
         );
 
       }
-
-
-      createReportAngleChart(
-        record
-      );
-
-
-      createReportTrajectoryChart(
-        record
-      );
-
-    },
-    50
-  );
-
-}
-
-
-/* =========================================================
-   22. ANGLE CHART
-========================================================= */
-
-function createReportAngleChart(
-  record
-) {
-
-  const canvas =
-    document.getElementById(
-      "reportAngleChart"
     );
 
-
-  if (!canvas) {
-    return;
-  }
+  },
 
 
-  destroyReportChart(
-    "angle"
-  );
+  /* =======================================================
+     02. SELECTOR
+  ======================================================= */
+
+  updateSelector(
+    selector,
+    selectedId
+  ) {
+
+    if (!selector) {
+      return;
+    }
 
 
-  const history =
-    buildAngleHistory(
-      record
-    );
+    selector.innerHTML =
+      Store.records
+        .map(
+          record => {
+
+            const date =
+              record.createdAt
+                ? new Date(
+                    record.createdAt
+                  ).toLocaleString(
+                    "ko-KR"
+                  )
+                : "-";
 
 
-  const labels =
-    history.map(
-      item =>
-        Number(
-          item.time
-        ).toFixed(1)
-    );
+            return `
 
+              <option
+                value="${record.id}"
+                ${
+                  record.id ===
+                  selectedId
+                    ? "selected"
+                    : ""
+                }
+              >
 
-  const left =
-    history.map(
-      item =>
-        item.leftKnee
-    );
+                ${record.typeName}
+                ·
+                ${date}
+                ·
+                ${this.number(
+                  record.score
+                )}점
 
+              </option>
 
-  const right =
-    history.map(
-      item =>
-        item.rightKnee
-    );
-
-
-  ReportState.charts.angle =
-    new Chart(
-      canvas,
-      {
-
-        type: "line",
-
-        data: {
-
-          labels,
-
-          datasets: [
-
-            {
-              label:
-                "좌측 무릎",
-
-              data:
-                left,
-
-              borderWidth: 2,
-
-              pointRadius: 0,
-
-              tension: 0.25
-
-            },
-
-            {
-              label:
-                "우측 무릎",
-
-              data:
-                right,
-
-              borderWidth: 2,
-
-              pointRadius: 0,
-
-              tension: 0.25
-
-            }
-
-          ]
-
-        },
-
-        options: {
-
-          responsive: true,
-
-          maintainAspectRatio:
-            false,
-
-          animation: false,
-
-          scales: {
-
-            y: {
-
-              min: 0,
-
-              max: 180,
-
-              title: {
-
-                display: true,
-
-                text:
-                  "관절각(°)"
-
-              }
-
-            },
-
-            x: {
-
-              title: {
-
-                display: true,
-
-                text:
-                  "시간(초)"
-
-              }
-
-            }
+            `;
 
           }
-
-        }
-
-      }
-    );
-
-}
-
-
-/* =========================================================
-   23. TRIGGER CHART
-========================================================= */
-
-function createReportTriggerChart(
-  record
-) {
-
-  const canvas =
-    document.getElementById(
-      "reportTriggerChart"
-    );
-
-
-  if (!canvas) {
-    return;
-  }
-
-
-  destroyReportChart(
-    "trigger"
-  );
-
-
-  const triggerData =
-    Array.isArray(
-      record.triggerData
-    )
-      ? record.triggerData
-      : [];
-
-
-  const labels =
-    triggerData.map(
-      item =>
-        formatReportTime(
-          item.time
         )
+        .join("");
+
+  },
+
+
+  /* =======================================================
+     03. TYPE NAME
+  ======================================================= */
+
+  typeName(
+    type
+  ) {
+
+    return {
+
+      ski:
+        "스키",
+
+      roller:
+        "롤러스키",
+
+      shooting:
+        "사격"
+
+    }[type] || "자세분석";
+
+  },
+
+
+  /* =======================================================
+     04. NUMBER FORMAT
+  ======================================================= */
+
+  number(
+    value
+  ) {
+
+    if (
+      value === null ||
+      value === undefined ||
+      value === "" ||
+      !Number.isFinite(
+        Number(value)
+      )
+    ) {
+
+      return "-";
+
+    }
+
+
+    return Math.round(
+      Number(value)
     );
 
-
-  const values =
-    triggerData.map(
-      item =>
-        Number(
-          item.confidence || 0
-        ) * 100
-    );
+  },
 
 
-  ReportState.charts.trigger =
-    new Chart(
-      canvas,
-      {
+  /* =======================================================
+     05. DURATION
+  ======================================================= */
 
-        type: "line",
+  duration(
+    seconds
+  ) {
 
-        data: {
+    if (
+      !Number.isFinite(
+        Number(seconds)
+      )
+    ) {
 
-          labels,
+      return "-";
 
-          datasets: [
+    }
 
-            {
-              label:
-                "격발 후보 신뢰도",
 
-              data:
-                values,
+    const total =
+      Math.max(
+        0,
+        Math.floor(
+          Number(seconds)
+        )
+      );
 
-              borderWidth: 2,
 
-              pointRadius: 5,
+    const minutes =
+      Math.floor(
+        total / 60
+      );
 
-              tension: 0.15
 
-            }
+    const remain =
+      total % 60;
 
-          ]
 
-        },
+    return `${String(
+      minutes
+    ).padStart(2, "0")}:${String(
+      remain
+    ).padStart(2, "0")}`;
 
-        options: {
+  },
 
-          responsive: true,
 
-          maintainAspectRatio:
-            false,
+  /* =======================================================
+     06. ANGLE CARD
+  ======================================================= */
 
-          animation: false,
+  angleCard(
+    title,
+    value
+  ) {
 
-          scales: {
+    const valid =
+      Number.isFinite(
+        Number(value)
+      );
 
-            y: {
 
-              min: 0,
+    return `
 
-              max: 100,
+      <div
+        class="report-card"
+      >
 
-              title: {
+        <small>
+          ${title}
+        </small>
 
-                display: true,
+        <strong>
+          ${
+            valid
+              ? Math.round(
+                  Number(value)
+                ) + "°"
+              : "-"
+          }
+        </strong>
 
-                text:
-                  "신뢰도(%)"
+      </div>
+
+    `;
+
+  },
+
+
+  /* =======================================================
+     07. FEEDBACK LIST
+  ======================================================= */
+
+  feedbackList(
+    title,
+    list
+  ) {
+
+    if (
+      !Array.isArray(list) ||
+      !list.length
+    ) {
+
+      return "";
+
+    }
+
+
+    return `
+
+      <p>
+
+        <b>
+          ${title}:
+        </b>
+
+        ${list.join(" ")}
+
+      </p>
+
+    `;
+
+  },
+
+
+  /* =======================================================
+     08. ANGLE CHART
+  ======================================================= */
+
+  drawAngleChart(
+    record
+  ) {
+
+    if (
+      typeof Chart ===
+      "undefined"
+    ) {
+
+      return;
+
+    }
+
+
+    const canvas =
+      document.getElementById(
+        "reportAngle"
+      );
+
+
+    if (!canvas) {
+      return;
+    }
+
+
+    /*
+     * 기존 차트 제거
+     */
+
+    if (
+      this.charts.angle
+    ) {
+
+      this.charts.angle.destroy();
+
+    }
+
+
+    const history =
+      Array.isArray(
+        record.angleHistory
+      )
+        ? record.angleHistory
+        : [];
+
+
+    /*
+     * 데이터가 없는 경우
+     */
+
+    if (!history.length) {
+
+      return;
+
+    }
+
+
+    const labels =
+      history.map(
+        item =>
+          Number(
+            item.time || 0
+          ).toFixed(1)
+      );
+
+
+    const leftKnee =
+      history.map(
+        item =>
+          Number.isFinite(
+            Number(
+              item.leftKnee
+            )
+          )
+            ? Number(
+                item.leftKnee
+              )
+            : null
+      );
+
+
+    const rightKnee =
+      history.map(
+        item =>
+          Number.isFinite(
+            Number(
+              item.rightKnee
+            )
+          )
+            ? Number(
+                item.rightKnee
+              )
+            : null
+      );
+
+
+    const leftHip =
+      history.map(
+        item =>
+          Number.isFinite(
+            Number(
+              item.leftHip
+            )
+          )
+            ? Number(
+                item.leftHip
+              )
+            : null
+      );
+
+
+    const rightHip =
+      history.map(
+        item =>
+          Number.isFinite(
+            Number(
+              item.rightHip
+            )
+          )
+            ? Number(
+                item.rightHip
+              )
+            : null
+      );
+
+
+    this.charts.angle =
+      new Chart(
+        canvas,
+        {
+
+          type:
+            "line",
+
+
+          data: {
+
+            labels,
+
+
+            datasets: [
+
+              {
+
+                label:
+                  "좌측 무릎",
+
+                data:
+                  leftKnee,
+
+                pointRadius:
+                  0,
+
+                borderWidth:
+                  2,
+
+                tension:
+                  0.25
+
+              },
+
+
+              {
+
+                label:
+                  "우측 무릎",
+
+                data:
+                  rightKnee,
+
+                pointRadius:
+                  0,
+
+                borderWidth:
+                  2,
+
+                tension:
+                  0.25
+
+              },
+
+
+              {
+
+                label:
+                  "좌측 고관절",
+
+                data:
+                  leftHip,
+
+                pointRadius:
+                  0,
+
+                borderWidth:
+                  1.5,
+
+                tension:
+                  0.25
+
+              },
+
+
+              {
+
+                label:
+                  "우측 고관절",
+
+                data:
+                  rightHip,
+
+                pointRadius:
+                  0,
+
+                borderWidth:
+                  1.5,
+
+                tension:
+                  0.25
+
+              }
+
+            ]
+
+          },
+
+
+          options: {
+
+            responsive:
+              true,
+
+            maintainAspectRatio:
+              false,
+
+            animation:
+              false,
+
+            interaction: {
+
+              intersect:
+                false,
+
+              mode:
+                "index"
+
+            },
+
+
+            plugins: {
+
+              legend: {
+
+                position:
+                  "top"
+
+              },
+
+              tooltip: {
+
+                callbacks: {
+
+                  label:
+                    context => {
+
+                      const value =
+                        context.parsed.y;
+
+
+                      return `${
+                        context.dataset.label
+                      }: ${
+                        Number.isFinite(
+                          value
+                        )
+                          ? Math.round(
+                              value
+                            ) + "°"
+                          : "-"
+                      }`;
+
+                    }
+
+                }
 
               }
 
             },
 
-            x: {
 
-              title: {
+            scales: {
 
-                display: true,
+              x: {
 
-                text:
-                  "영상 시간"
+                title: {
+
+                  display:
+                    true,
+
+                  text:
+                    "시간 (초)"
+
+                }
+
+              },
+
+
+              y: {
+
+                min:
+                  0,
+
+                max:
+                  180,
+
+                title: {
+
+                  display:
+                    true,
+
+                  text:
+                    "각도 (°)"
+
+                }
 
               }
 
@@ -1802,1007 +1142,400 @@ function createReportTriggerChart(
           }
 
         }
+      );
 
-      }
-    );
-
-}
+  },
 
 
-/* =========================================================
-   24. TRAJECTORY CHART
-========================================================= */
+  /* =======================================================
+     09. TRAJECTORY GRAPH
+  ======================================================= */
 
-function createReportTrajectoryChart(
-  record
-) {
-
-  const canvas =
-    document.getElementById(
-      "reportTrajectoryChart"
-    );
-
-
-  if (!canvas) {
-    return;
-  }
-
-
-  destroyReportChart(
-    "trajectory"
-  );
-
-
-  const trajectory =
-    Array.isArray(
-      record.trajectory
-    )
-      ? record.trajectory
-      : [];
-
-
-  if (
-    trajectory.length < 2
+  drawTrajectory(
+    record
   ) {
 
-    return;
-  }
+    const canvas =
+      document.getElementById(
+        "reportTrajectory"
+      );
 
 
-  const labels =
-    trajectory.map(
-      item =>
-        Number(
-          item.t
-        ).toFixed(1)
+    if (!canvas) {
+      return;
+    }
+
+
+    const rect =
+      canvas.getBoundingClientRect();
+
+
+    const dpr =
+      window.devicePixelRatio ||
+      1;
+
+
+    const width =
+      Math.max(
+        1,
+        rect.width
+      );
+
+
+    const height =
+      Math.max(
+        1,
+        rect.height
+      );
+
+
+    canvas.width =
+      width *
+      dpr;
+
+
+    canvas.height =
+      height *
+      dpr;
+
+
+    const ctx =
+      canvas.getContext(
+        "2d"
+      );
+
+
+    ctx.clearRect(
+      0,
+      0,
+      canvas.width,
+      canvas.height
     );
 
 
-  const xValues =
-    trajectory.map(
-      item =>
-        Number(
-          item.x
-        ).toFixed(4)
-    );
+    const trajectory =
+      Array.isArray(
+        record.trajectory
+      )
+        ? record.trajectory
+        : [];
 
 
-  const yValues =
-    trajectory.map(
-      item =>
-        Number(
-          item.y
-        ).toFixed(4)
-    );
+    if (
+      trajectory.length < 2
+    ) {
+
+      ctx.fillStyle =
+        "#819099";
+
+      ctx.font =
+        `${13 * dpr}px sans-serif`;
+
+      ctx.textAlign =
+        "center";
+
+      ctx.fillText(
+        "중심 궤적 데이터가 없습니다.",
+        canvas.width / 2,
+        canvas.height / 2
+      );
 
 
-  ReportState.charts.trajectory =
-    new Chart(
-      canvas,
-      {
+      return;
 
-        type: "line",
+    }
 
-        data: {
 
-          labels,
+    /*
+     * 배경 격자
+     */
 
-          datasets: [
+    ctx.strokeStyle =
+      "rgba(23,60,80,.07)";
 
-            {
-              label:
-                "중심 X",
 
-              data:
-                xValues,
+    ctx.lineWidth =
+      1 * dpr;
 
-              borderWidth: 2,
 
-              pointRadius: 0,
+    const grid =
+      10;
 
-              tension: 0.15
 
-            },
+    for (
+      let i = 0;
+      i <= grid;
+      i++
+    ) {
 
-            {
-              label:
-                "중심 Y",
+      const x =
+        canvas.width *
+        i /
+        grid;
 
-              data:
-                yValues,
 
-              borderWidth: 2,
+      const y =
+        canvas.height *
+        i /
+        grid;
 
-              pointRadius: 0,
 
-              tension: 0.15
+      ctx.beginPath();
 
-            }
+      ctx.moveTo(
+        x,
+        0
+      );
 
-          ]
+      ctx.lineTo(
+        x,
+        canvas.height
+      );
 
-        },
+      ctx.stroke();
 
-        options: {
 
-          responsive: true,
+      ctx.beginPath();
 
-          maintainAspectRatio:
-            false,
+      ctx.moveTo(
+        0,
+        y
+      );
 
-          animation: false,
+      ctx.lineTo(
+        canvas.width,
+        y
+      );
 
-          scales: {
+      ctx.stroke();
 
-            x: {
+    }
 
-              title: {
 
-                display: true,
+    /*
+     * 중심 궤적
+     */
 
-                text:
-                  "시간(초)"
+    ctx.beginPath();
 
-              }
 
-            },
+    trajectory.forEach(
+      (point, index) => {
 
-            y: {
+        const x =
+          Number(point.x) *
+          canvas.width;
 
-              title: {
 
-                display: true,
+        const y =
+          Number(point.y) *
+          canvas.height;
 
-                text:
-                  "화면 좌표"
 
-              }
+        if (
+          index === 0
+        ) {
 
-            }
+          ctx.moveTo(
+            x,
+            y
+          );
 
-          }
+        } else {
+
+          ctx.lineTo(
+            x,
+            y
+          );
 
         }
 
       }
     );
 
-}
+
+    ctx.strokeStyle =
+      "#315f76";
 
 
-/* =========================================================
-   25. ANGLE HISTORY
-========================================================= */
+    ctx.lineWidth =
+      2.5 * dpr;
 
-function buildAngleHistory(
-  record
-) {
 
-  /*
-    현재 record에는 최근 프레임 데이터가
-    들어올 수 있고, 없는 경우 metrics를
-    이용하여 최소한의 결과를 표시한다.
-  */
+    ctx.lineJoin =
+      "round";
 
-  if (
-    Array.isArray(
-      record.angleHistory
-    ) &&
-    record.angleHistory.length
+
+    ctx.lineCap =
+      "round";
+
+
+    ctx.stroke();
+
+
+    /*
+     * 시작점
+     */
+
+    const first =
+      trajectory[0];
+
+
+    ctx.beginPath();
+
+    ctx.arc(
+      first.x *
+        canvas.width,
+      first.y *
+        canvas.height,
+      5 * dpr,
+      0,
+      Math.PI * 2
+    );
+
+
+    ctx.fillStyle =
+      "#315f76";
+
+
+    ctx.fill();
+
+
+    /*
+     * 마지막점
+     */
+
+    const last =
+      trajectory[
+        trajectory.length - 1
+      ];
+
+
+    ctx.beginPath();
+
+    ctx.arc(
+      last.x *
+        canvas.width,
+      last.y *
+        canvas.height,
+      6 * dpr,
+      0,
+      Math.PI * 2
+    );
+
+
+    ctx.fillStyle =
+      "#173c50";
+
+
+    ctx.fill();
+
+
+  },
+
+
+  /* =======================================================
+     10. CHANGE REPORT
+  ======================================================= */
+
+  change(
+    id
   ) {
 
-    return record.angleHistory;
-
-  }
-
-
-  if (
-    record.metrics
-  ) {
-
-    return [
-
-      {
-
-        time: 0,
-
-        leftKnee:
-          record.metrics.leftKnee,
-
-        rightKnee:
-          record.metrics.rightKnee,
-
-        leftHip:
-          record.metrics.leftHip,
-
-        rightHip:
-          record.metrics.rightHip,
-
-        trunk:
-          record.metrics.trunk
-
-      }
-
-    ];
-
-  }
-
-
-  return [];
-
-}
-
-
-/* =========================================================
-   26. DESTROY CHART
-========================================================= */
-
-function destroyReportChart(
-  type
-) {
-
-  const chart =
-    ReportState.charts[
-      type
-    ];
-
-
-  if (chart) {
-
-    chart.destroy();
-
-    ReportState.charts[
-      type
-    ] = null;
-
-  }
-
-}
-
-
-/* =========================================================
-   27. PRINT
-========================================================= */
-
-function printReport() {
-
-  const record =
-    getCurrentRecord();
-
-
-  if (!record) {
-
-    alert(
-      "먼저 분석 리포트를 선택하세요."
+    this.render(
+      id
     );
 
-    return;
-  }
-
-
-  window.print();
-
-}
-
-
-/* =========================================================
-   28. DOWNLOAD HTML REPORT
-========================================================= */
-
-function downloadReportHtml() {
-
-  const record =
-    getCurrentRecord();
-
-
-  if (!record) {
-
-    BiathlonEvents?.showToast(
-      "다운로드할 리포트가 없습니다."
+    UI.go(
+      "report"
     );
 
-    return;
-  }
+  },
 
 
-  const container =
-    document.getElementById(
-      "reportContainer"
-    );
+  /* =======================================================
+     11. INIT
+  ======================================================= */
 
+  init() {
 
-  if (!container) {
-    return;
-  }
+    /*
+     * 리포트 선택
+     */
 
+    const selector =
+      document.getElementById(
+        "reportSelect"
+      );
 
-  const html = `
 
-<!DOCTYPE html>
+    selector?.addEventListener(
+      "change",
+      event => {
 
-<html lang="ko">
+        this.render(
+          event.target.value
+        );
 
-<head>
-
-<meta charset="UTF-8">
-
-<title>
-설천 바이애슬론 분석 리포트
-</title>
-
-<style>
-
-body {
-  font-family:
-    Arial,
-    sans-serif;
-
-  margin: 0;
-
-  padding: 40px;
-
-  color: #17232b;
-
-  background: #f5f8fa;
-}
-
-.report-document {
-  max-width: 1000px;
-
-  margin: auto;
-
-  background: white;
-
-  padding: 40px;
-}
-
-h1,
-h2,
-h3 {
-  margin-top: 0;
-}
-
-.report-header {
-  border-bottom:
-    2px solid #dce6eb;
-
-  padding-bottom: 25px;
-
-  margin-bottom: 30px;
-}
-
-.report-section {
-  margin-bottom: 35px;
-}
-
-.report-score-number {
-  font-size: 70px;
-
-  font-weight: 800;
-}
-
-.report-score-layout {
-  display: grid;
-
-  grid-template-columns:
-    220px 1fr;
-
-  gap: 30px;
-}
-
-.report-metric {
-  margin-bottom: 18px;
-}
-
-.report-metric-track {
-  height: 8px;
-
-  background: #e7edf0;
-
-  border-radius: 20px;
-}
-
-.report-metric-fill {
-  height: 100%;
-
-  background: #315f76;
-
-  border-radius: 20px;
-}
-
-.report-chart-box {
-  height: 300px;
-
-  position: relative;
-}
-
-.report-analysis-grid {
-  display: grid;
-
-  grid-template-columns:
-    repeat(4, 1fr);
-
-  gap: 12px;
-}
-
-.report-analysis-card {
-  border:
-    1px solid #dce6eb;
-
-  padding: 20px;
-
-  border-radius: 10px;
-}
-
-.report-analysis-card span {
-  display: block;
-
-  font-size: 12px;
-
-  color: #6b7b84;
-}
-
-.report-analysis-card strong {
-  display: block;
-
-  font-size: 28px;
-
-  margin-top: 8px;
-}
-
-.shot-report-grid {
-  display: grid;
-
-  grid-template-columns:
-    repeat(5, 1fr);
-
-  gap: 10px;
-}
-
-.shot-report-card {
-  border:
-    1px solid #dce6eb;
-
-  padding: 15px;
-
-  border-radius: 10px;
-}
-
-.shot-report-number {
-  font-size: 25px;
-
-  font-weight: bold;
-}
-
-.shot-report-info span {
-  display: block;
-
-  font-size: 11px;
-
-  color: #71808a;
-
-  margin-top: 10px;
-}
-
-.report-key-frame-grid {
-  display: grid;
-
-  grid-template-columns:
-    repeat(3, 1fr);
-
-  gap: 15px;
-}
-
-.report-frame-placeholder {
-  height: 160px;
-
-  display: flex;
-
-  align-items: center;
-
-  justify-content: center;
-
-  background: #edf3f6;
-}
-
-.report-frame-meta {
-  display: flex;
-
-  justify-content:
-    space-between;
-
-  padding: 8px;
-}
-
-.report-footer {
-  border-top:
-    1px solid #dce6eb;
-
-  margin-top: 40px;
-
-  padding-top: 15px;
-
-  display: flex;
-
-  justify-content:
-    space-between;
-
-  color: #6b7b84;
-
-  font-size: 12px;
-}
-
-@media print {
-
-  body {
-    background: white;
-
-    padding: 0;
-  }
-
-  .report-document {
-    padding: 20px;
-  }
-
-}
-
-</style>
-
-</head>
-
-<body>
-
-${container.innerHTML}
-
-</body>
-
-</html>
-
-  `;
-
-
-  const blob =
-    new Blob(
-      [html],
-      {
-        type:
-          "text/html;charset=utf-8"
       }
     );
 
 
-  const url =
-    URL.createObjectURL(
-      blob
-    );
+    /*
+     * 인쇄 / PDF
+     */
+
+    document
+      .getElementById(
+        "printReport"
+      )
+      ?.addEventListener(
+        "click",
+        () => {
+
+          if (
+            !Store.records.length
+          ) {
+
+            UI.toast(
+              "먼저 분석 기록을 만들어주세요."
+            );
+
+            return;
+
+          }
 
 
-  const link =
-    document.createElement(
-      "a"
-    );
+          window.print();
 
-
-  link.href =
-    url;
-
-
-  link.download =
-    `설천_${getReportTypeName(
-      record.type
-    )}_리포트.html`;
-
-
-  document.body.appendChild(
-    link
-  );
-
-
-  link.click();
-
-
-  link.remove();
-
-
-  URL.revokeObjectURL(
-    url
-  );
-
-
-  BiathlonEvents?.showToast(
-    "리포트를 저장했습니다."
-  );
-
-}
-
-
-/* =========================================================
-   29. REPORT BUTTONS
-========================================================= */
-
-document.addEventListener(
-  "click",
-  event => {
-
-    const printButton =
-      event.target.closest(
-        "#printReportButton"
+        }
       );
 
 
-    if (printButton) {
+    /*
+     * 초기 리포트
+     */
 
-      printReport();
-
-      return;
-    }
-
-
-    const downloadButton =
-      event.target.closest(
-        "#downloadReportButton"
-      );
-
-
-    if (downloadButton) {
-
-      downloadReportHtml();
-
-      return;
-    }
-
-
-    const typeButton =
-      event.target.closest(
-        "[data-report-select]"
-      );
-
-
-    if (typeButton) {
-
-      const type =
-        typeButton.dataset
-          .reportSelect;
-
-
-      openReport(
-        type
-      );
-
-      return;
-    }
-
-  }
-);
-
-
-/* =========================================================
-   30. REPORT TYPE NAME
-========================================================= */
-
-function getReportTypeName(
-  type
-) {
-
-  const names = {
-
-    ski:
-      "스키",
-
-    roller:
-      "롤러스키",
-
-    shooting:
-      "사격"
-
-  };
-
-
-  return names[type] ||
-    "바이애슬론";
-
-}
-
-
-/* =========================================================
-   31. CAMERA NAME
-========================================================= */
-
-function getReportCameraName(
-  camera
-) {
-
-  const names = {
-
-    side:
-      "측면",
-
-    front:
-      "정면",
-
-    rear:
-      "후면"
-
-  };
-
-
-  return names[camera] ||
-    "측면";
-
-}
-
-
-/* =========================================================
-   32. SHOOTING MODE
-========================================================= */
-
-function getReportShootingMode(
-  mode
-) {
-
-  const names = {
-
-    prone:
-      "엎드려쏴",
-
-    standing:
-      "서서쏴"
-
-  };
-
-
-  return names[mode] ||
-    mode ||
-    "-";
-
-}
-
-
-/* =========================================================
-   33. REPORT TIME
-========================================================= */
-
-function formatReportTime(
-  seconds
-) {
-
-  if (
-    !Number.isFinite(
-      Number(seconds)
-    )
-  ) {
-
-    return "-";
-
-  }
-
-
-  const value =
-    Number(seconds);
-
-
-  const minute =
-    Math.floor(
-      value / 60
+    this.render(
+      Store.records[0]?.id ||
+      null
     );
 
-
-  const second =
-    value % 60;
-
-
-  return (
-    String(minute)
-      .padStart(2, "0") +
-    ":" +
-    second
-      .toFixed(2)
-      .padStart(5, "0")
-  );
-
-}
-
-
-/* =========================================================
-   34. REPORT DATE
-========================================================= */
-
-function formatReportDate(
-  value
-) {
-
-  if (!value) {
-    return "-";
   }
-
-
-  const date =
-    new Date(
-      value
-    );
-
-
-  if (
-    Number.isNaN(
-      date.getTime()
-    )
-  ) {
-
-    return "-";
-
-  }
-
-
-  return (
-    date.getFullYear() +
-    "-" +
-    String(
-      date.getMonth() + 1
-    ).padStart(2, "0") +
-    "-" +
-    String(
-      date.getDate()
-    ).padStart(2, "0")
-  );
-
-}
-
-
-/* =========================================================
-   35. AVERAGE REPORT ANGLES
-========================================================= */
-
-function averageReportAngles(
-  metrics
-) {
-
-  if (!metrics) {
-    return null;
-  }
-
-
-  const values = [
-
-    metrics.leftKnee,
-
-    metrics.rightKnee
-
-  ].filter(
-    Number.isFinite
-  );
-
-
-  if (!values.length) {
-    return null;
-  }
-
-
-  return Math.round(
-    values.reduce(
-      (sum, value) =>
-        sum + value,
-      0
-    ) /
-    values.length
-  );
-
-}
-
-
-/* =========================================================
-   36. CLAMP
-========================================================= */
-
-function clampReport(
-  value,
-  min,
-  max
-) {
-
-  return Math.max(
-    min,
-    Math.min(
-      max,
-      Number(value) || 0
-    )
-  );
-
-}
-
-
-/* =========================================================
-   37. HTML ESCAPE
-========================================================= */
-
-function escapeReportHtml(
-  value
-) {
-
-  return String(
-    value ?? ""
-  )
-    .replaceAll(
-      "&",
-      "&amp;"
-    )
-    .replaceAll(
-      "<",
-      "&lt;"
-    )
-    .replaceAll(
-      ">",
-      "&gt;"
-    )
-    .replaceAll(
-      '"',
-      "&quot;"
-    )
-    .replaceAll(
-      "'",
-      "&#039;"
-    );
-
-}
-
-
-/* =========================================================
-   38. PUBLIC API
-========================================================= */
-
-window.ReportSystem = {
-
-  open:
-    openReport,
-
-  render:
-    renderReport,
-
-  setCurrentRecord:
-    setCurrentRecord,
-
-  getCurrentRecord:
-    getCurrentRecord,
-
-  print:
-    printReport,
-
-  download:
-    downloadReportHtml
 
 };
 
 
 /* =========================================================
-   39. INITIALIZE
+   INIT
 ========================================================= */
 
-function initReportSystem() {
-
-  const record =
-    getCurrentRecord();
+Report.init();
 
 
-  if (record) {
+/* =========================================================
+   PUBLIC API
+========================================================= */
 
-    renderReport();
-
-  }
-
-}
-
-
-if (
-  document.readyState ===
-  "loading"
-) {
-
-  document.addEventListener(
-    "DOMContentLoaded",
-    initReportSystem
-  );
-
-} else {
-
-  initReportSystem();
-
-}
+window.Report =
+  Report;
