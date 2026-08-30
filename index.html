@@ -1,103 +1,217 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport"
-        content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta charset="UTF-8">
 
-  <title>설천 Biathlon Performance Center</title>
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
 
-  <link rel="stylesheet" href="style.css">
+  <title>
+    설천 BIATHLON 자세분석 PRO
+  </title>
 
-  <!-- Chart.js -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <!-- =====================================================
+       CSS
+  ====================================================== -->
 
-  <!-- MediaPipe Pose -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+  <link
+    rel="stylesheet"
+    href="style.css"
+  >
+
+
+  <!-- =====================================================
+       Chart.js
+  ====================================================== -->
+
+  <script
+    src="https://cdn.jsdelivr.net/npm/chart.js"
+  ></script>
+
+
+  <!-- =====================================================
+       MediaPipe Pose
+  ====================================================== -->
+
+  <script
+    src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"
+  ></script>
+
+
+  <script
+    src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"
+  ></script>
+
+
+  <script
+    src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"
+  ></script>
+
 </head>
+
 
 <body>
 
-<div class="app">
+
+<!-- =======================================================
+     APP
+======================================================== -->
+
+<div
+  id="app"
+  class="app"
+>
+
 
   <!-- =====================================================
        SIDEBAR
   ====================================================== -->
 
-  <aside class="sidebar">
+  <aside
+    class="sidebar"
+    id="sidebar"
+  >
 
-    <div class="brand">
+    <div
+      class="brand"
+    >
 
-      <div class="brand-mark">
+      <div
+        class="brand-mark"
+      >
         S
       </div>
 
       <div>
-        <b>설천</b>
-        <small>BIATHLON</small>
+
+        <strong>
+          설천
+        </strong>
+
+        <span>
+          BIATHLON
+        </span>
+
       </div>
 
     </div>
 
 
-    <div class="athlete-card">
+    <!-- 선수 -->
 
-      <span>선수</span>
-
-      <b id="athleteNameSide">
-        이은성
-      </b>
+    <div
+      class="athlete-card"
+    >
 
       <small>
-        설천고등학교 · 2010
+        선수
       </small>
+
+      <strong
+        id="athleteNameSide"
+      >
+        이은성
+      </strong>
+
+      <span>
+        설천고등학교 · 2010
+      </span>
 
     </div>
 
 
+    <!-- 메뉴 -->
+
     <nav>
 
-      <button data-page="dashboard">
-        ⌂
-        <span>대시보드</span>
+      <button
+        class="nav-button active"
+        data-page="dashboard"
+      >
+        <span>⌂</span>
+        대시보드
       </button>
 
-      <button data-page="ski">
-        🎿
-        <span>스키 분석</span>
+
+      <div
+        class="nav-label"
+      >
+        자세분석
+      </div>
+
+
+      <button
+        class="nav-button"
+        data-page="ski"
+      >
+        <span>🎿</span>
+        스키 분석
       </button>
 
-      <button data-page="roller">
-        🛼
-        <span>롤러스키 분석</span>
+
+      <button
+        class="nav-button"
+        data-page="roller"
+      >
+        <span>🛼</span>
+        롤러스키 분석
       </button>
 
-      <button data-page="shooting">
-        🎯
-        <span>사격 분석</span>
+
+      <button
+        class="nav-button"
+        data-page="shooting"
+      >
+        <span>🎯</span>
+        사격 분석
       </button>
 
-      <button data-page="compare">
-        ⇄
-        <span>비교분석</span>
+
+      <div
+        class="nav-label"
+      >
+        데이터
+      </div>
+
+
+      <button
+        class="nav-button"
+        data-page="compare"
+      >
+        <span>⇄</span>
+        비교분석
       </button>
 
-      <button data-page="records">
-        ▣
-        <span>분석 기록</span>
+
+      <button
+        class="nav-button"
+        data-page="records"
+      >
+        <span>▣</span>
+        분석 기록
       </button>
 
-      <button data-page="report">
-        ▤
-        <span>리포트</span>
+
+      <button
+        class="nav-button"
+        data-page="report"
+      >
+        <span>▤</span>
+        리포트
       </button>
 
     </nav>
 
 
-    <div class="system">
+    <div
+      class="sidebar-status"
+    >
 
-      ● ANALYSIS SYSTEM
+      <span>
+        ● ANALYSIS SYSTEM
+      </span>
 
       <b>
         READY
@@ -108,20 +222,25 @@
   </aside>
 
 
+
   <!-- =====================================================
        MAIN
   ====================================================== -->
 
-  <main class="main">
+  <main
+    class="main"
+  >
 
 
-    <!-- TOP BAR -->
+    <!-- HEADER -->
 
-    <header class="topbar">
+    <header
+      class="topbar"
+    >
 
       <button
         id="menuButton"
-        class="icon-btn"
+        class="menu-button"
       >
         ☰
       </button>
@@ -129,24 +248,34 @@
 
       <div>
 
-        <small>
+        <span
+          class="top-eyebrow"
+        >
           SEOLCHEON PERFORMANCE CENTER
-        </small>
+        </span>
 
-        <h1 id="pageTitle">
+        <h1
+          id="pageTitle"
+        >
           대시보드
         </h1>
 
       </div>
 
 
-      <div class="online">
+      <div
+        class="system-status"
+      >
 
-        ● SYSTEM ONLINE
-
-        <span id="clock">
-          --:--:--
+        <span>
+          ● SYSTEM ONLINE
         </span>
+
+        <b
+          id="clock"
+        >
+          --:--:--
+        </b>
 
       </div>
 
@@ -155,7 +284,7 @@
 
 
     <!-- ===================================================
-         DASHBOARD
+         PAGE : DASHBOARD
     ==================================================== -->
 
     <section
@@ -163,11 +292,13 @@
       class="page active"
     >
 
-      <div class="hero">
+      <div
+        class="dashboard-hero"
+      >
 
         <div>
 
-          <span class="eyebrow">
+          <span>
             BIATHLON PERFORMANCE
           </span>
 
@@ -177,7 +308,7 @@
 
           <p>
             스키 · 롤러스키 · 사격 자세를
-            한 화면에서 분석하고 기록을 비교합니다.
+            전문적으로 분석하고 기록합니다.
           </p>
 
         </div>
@@ -185,41 +316,55 @@
       </div>
 
 
-      <div class="cards">
+      <div
+        class="dashboard-grid"
+      >
 
-        <div class="stat">
+        <div
+          class="stat-card"
+        >
 
           <small>
             분석 기록
           </small>
 
-          <strong id="dashRecords">
+          <strong
+            id="dashRecords"
+          >
             0
           </strong>
 
         </div>
 
 
-        <div class="stat">
+        <div
+          class="stat-card"
+        >
 
           <small>
             최근 점수
           </small>
 
-          <strong id="dashScore">
+          <strong
+            id="dashScore"
+          >
             -
           </strong>
 
         </div>
 
 
-        <div class="stat">
+        <div
+          class="stat-card"
+        >
 
           <small>
             비교 데이터
           </small>
 
-          <strong id="dashCompare">
+          <strong
+            id="dashCompare"
+          >
             0
           </strong>
 
@@ -228,17 +373,21 @@
       </div>
 
 
-      <div class="panel">
+      <div
+        class="dashboard-panel"
+      >
 
-        <div class="panel-head">
+        <div
+          class="panel-header"
+        >
 
           <h3>
             최근 분석
           </h3>
 
           <button
+            class="secondary-button"
             data-page="records"
-            class="ghost"
           >
             전체 보기
           </button>
@@ -248,8 +397,16 @@
 
         <div
           id="recentRecords"
-          class="record-list"
-        ></div>
+          class="records-list"
+        >
+
+          <div
+            class="empty"
+          >
+            최근 분석 기록이 없습니다.
+          </div>
+
+        </div>
 
       </div>
 
@@ -258,7 +415,7 @@
 
 
     <!-- ===================================================
-         SKI
+         PAGE : SKI
     ==================================================== -->
 
     <section
@@ -266,41 +423,79 @@
       class="page"
     >
 
-      <div class="section-title">
-
-        <div>
-
-          <span class="eyebrow">
-            SKI
-          </span>
-
-          <h2>
-            스키 자세분석
-          </h2>
-
-        </div>
-
-      </div>
-
-
-      <div class="workspace">
+      <div
+        class="analysis-layout"
+      >
 
 
         <!-- VIDEO -->
 
-        <div class="video-panel">
+        <div
+          class="analysis-main"
+        >
 
-          <div class="video-wrap">
+          <div
+            class="analysis-title"
+          >
+
+            <div>
+
+              <span>
+                SKI TECHNIQUE
+              </span>
+
+              <h2>
+                스키 자세분석
+              </h2>
+
+            </div>
+
+
+            <div
+              class="camera-selector"
+            >
+
+              <button
+                class="camera-button active"
+                data-camera="side"
+              >
+                측면
+              </button>
+
+              <button
+                class="camera-button"
+                data-camera="front"
+              >
+                정면
+              </button>
+
+              <button
+                class="camera-button"
+                data-camera="rear"
+              >
+                후면
+              </button>
+
+            </div>
+
+          </div>
+
+
+          <div
+            class="video-box"
+          >
 
             <video
               id="skiVideo"
               playsinline
-              muted
+              preload="metadata"
             ></video>
+
 
             <canvas
               id="skiCanvas"
             ></canvas>
+
 
             <div
               id="skiEmpty"
@@ -312,27 +507,51 @@
           </div>
 
 
-          <div class="controls">
+          <!-- CONTROLS -->
 
-            <button id="skiPrev">
+          <div
+            class="video-controls"
+          >
+
+            <button
+              id="skiPrev"
+              class="control-button"
+            >
               ‹
             </button>
 
-            <button id="skiPlay">
+
+            <button
+              id="skiPlay"
+              class="control-button play"
+            >
               ▶
             </button>
 
-            <button id="skiNext">
+
+            <button
+              id="skiNext"
+              class="control-button"
+            >
               ›
             </button>
 
-            <button id="skiSlow">
+
+            <button
+              id="skiSlow"
+              class="speed-button"
+            >
               0.5×
             </button>
 
-            <button id="skiNormal">
+
+            <button
+              id="skiNormal"
+              class="speed-button"
+            >
               1×
             </button>
+
 
             <input
               id="skiSeek"
@@ -345,43 +564,82 @@
           </div>
 
 
-          <input
-            id="skiInput"
-            type="file"
-            accept="video/*"
-            hidden
+          <div
+            class="action-row"
           >
 
+            <input
+              id="skiInput"
+              type="file"
+              accept="video/*"
+              hidden
+            >
 
-          <button
-            id="skiUpload"
-            class="primary"
+
+            <button
+              id="skiUpload"
+              class="primary-button"
+            >
+              영상 선택
+            </button>
+
+
+            <button
+              id="skiStart"
+              class="primary-button"
+            >
+              자세분석 시작
+            </button>
+
+
+            <button
+              id="skiStop"
+              class="danger-button"
+            >
+              분석 종료 · 저장
+            </button>
+
+          </div>
+
+
+          <!-- 분석 도구 -->
+
+          <div
+            class="tool-row"
           >
-            영상 선택
-          </button>
 
+            <button
+              data-tool="bookmark"
+              data-type="ski"
+            >
+              🔖 구간 저장
+            </button>
 
-          <button
-            id="skiStart"
-            class="primary"
-          >
-            자세분석 시작
-          </button>
+            <button
+              data-tool="capture"
+              data-type="ski"
+            >
+              📸 자세 캡처
+            </button>
 
+            <button
+              data-tool="cycle"
+              data-type="ski"
+            >
+              🔄 사이클 분석
+            </button>
 
-          <button
-            id="skiStop"
-            class="danger"
-          >
-            분석 종료·저장
-          </button>
+          </div>
+
 
         </div>
 
 
         <!-- METRICS -->
 
-        <div class="metric-panel">
+        <aside
+          class="analysis-side"
+        >
 
           <h3>
             실시간 지표
@@ -389,25 +647,41 @@
 
 
           <div
-            class="metric-grid"
             id="skiMetrics"
-          ></div>
+            class="metrics-grid"
+          >
 
+            <div class="metric">
+              <small>대칭성</small>
+              <strong>-</strong>
+            </div>
 
-          <div class="chart-box">
+            <div class="metric">
+              <small>중심 안정성</small>
+              <strong>-</strong>
+            </div>
 
-            <canvas
-              id="skiChart"
-            ></canvas>
+            <div class="metric">
+              <small>동작 일관성</small>
+              <strong>-</strong>
+            </div>
+
+            <div class="metric">
+              <small>사이클</small>
+              <strong>-</strong>
+            </div>
 
           </div>
 
 
-          <div class="trajectory">
+          <h3>
+            중심 궤적
+          </h3>
 
-            <h3>
-              중심 궤적
-            </h3>
+
+          <div
+            class="trajectory-box"
+          >
 
             <canvas
               id="skiTrajectory"
@@ -415,7 +689,23 @@
 
           </div>
 
-        </div>
+
+          <h3>
+            관절각 변화
+          </h3>
+
+
+          <div
+            class="chart-box"
+          >
+
+            <canvas
+              id="skiChart"
+            ></canvas>
+
+          </div>
+
+        </aside>
 
       </div>
 
@@ -424,7 +714,7 @@
 
 
     <!-- ===================================================
-         ROLLER SKI
+         PAGE : ROLLER
     ==================================================== -->
 
     <section
@@ -432,39 +722,77 @@
       class="page"
     >
 
-      <div class="section-title">
-
-        <div>
-
-          <span class="eyebrow">
-            ROLLER SKI
-          </span>
-
-          <h2>
-            롤러스키 자세분석
-          </h2>
-
-        </div>
-
-      </div>
+      <div
+        class="analysis-layout"
+      >
 
 
-      <div class="workspace">
+        <div
+          class="analysis-main"
+        >
+
+          <div
+            class="analysis-title"
+          >
+
+            <div>
+
+              <span>
+                ROLLER SKI TECHNIQUE
+              </span>
+
+              <h2>
+                롤러스키 자세분석
+              </h2>
+
+            </div>
 
 
-        <div class="video-panel">
+            <div
+              class="camera-selector"
+            >
 
-          <div class="video-wrap">
+              <button
+                class="camera-button active"
+                data-camera="side"
+              >
+                측면
+              </button>
+
+              <button
+                class="camera-button"
+                data-camera="front"
+              >
+                정면
+              </button>
+
+              <button
+                class="camera-button"
+                data-camera="rear"
+              >
+                후면
+              </button>
+
+            </div>
+
+          </div>
+
+
+          <div
+            class="video-box"
+          >
 
             <video
               id="rollerVideo"
               playsinline
-              muted
+              preload="metadata"
             ></video>
+
 
             <canvas
               id="rollerCanvas"
             ></canvas>
+
 
             <div
               id="rollerEmpty"
@@ -476,27 +804,49 @@
           </div>
 
 
-          <div class="controls">
+          <div
+            class="video-controls"
+          >
 
-            <button id="rollerPrev">
+            <button
+              id="rollerPrev"
+              class="control-button"
+            >
               ‹
             </button>
 
-            <button id="rollerPlay">
+
+            <button
+              id="rollerPlay"
+              class="control-button play"
+            >
               ▶
             </button>
 
-            <button id="rollerNext">
+
+            <button
+              id="rollerNext"
+              class="control-button"
+            >
               ›
             </button>
 
-            <button id="rollerSlow">
+
+            <button
+              id="rollerSlow"
+              class="speed-button"
+            >
               0.5×
             </button>
 
-            <button id="rollerNormal">
+
+            <button
+              id="rollerNormal"
+              class="speed-button"
+            >
               1×
             </button>
+
 
             <input
               id="rollerSeek"
@@ -509,41 +859,85 @@
           </div>
 
 
-          <input
-            id="rollerInput"
-            type="file"
-            accept="video/*"
-            hidden
+          <div
+            class="action-row"
           >
 
+            <input
+              id="rollerInput"
+              type="file"
+              accept="video/*"
+              hidden
+            >
 
-          <button
-            id="rollerUpload"
-            class="primary"
+
+            <button
+              id="rollerUpload"
+              class="primary-button"
+            >
+              영상 선택
+            </button>
+
+
+            <button
+              id="rollerStart"
+              class="primary-button"
+            >
+              자세분석 시작
+            </button>
+
+
+            <button
+              id="rollerStop"
+              class="danger-button"
+            >
+              분석 종료 · 저장
+            </button>
+
+          </div>
+
+
+          <div
+            class="tool-row"
           >
-            영상 선택
-          </button>
 
+            <button
+              data-tool="bookmark"
+              data-type="roller"
+            >
+              🔖 구간 저장
+            </button>
 
-          <button
-            id="rollerStart"
-            class="primary"
-          >
-            자세분석 시작
-          </button>
+            <button
+              data-tool="capture"
+              data-type="roller"
+            >
+              📸 자세 캡처
+            </button>
 
+            <button
+              data-tool="cycle"
+              data-type="roller"
+            >
+              🔄 사이클 분석
+            </button>
 
-          <button
-            id="rollerStop"
-            class="danger"
-          >
-            분석 종료·저장
-          </button>
+            <button
+              data-tool="push"
+              data-type="roller"
+            >
+              🛼 푸시오프 분석
+            </button>
+
+          </div>
+
 
         </div>
 
 
-        <div class="metric-panel">
+        <aside
+          class="analysis-side"
+        >
 
           <h3>
             실시간 지표
@@ -551,25 +945,51 @@
 
 
           <div
-            class="metric-grid"
             id="rollerMetrics"
-          ></div>
+            class="metrics-grid"
+          >
 
+            <div class="metric">
+              <small>대칭성</small>
+              <strong>-</strong>
+            </div>
 
-          <div class="chart-box">
+            <div class="metric">
+              <small>중심 안정성</small>
+              <strong>-</strong>
+            </div>
 
-            <canvas
-              id="rollerChart"
-            ></canvas>
+            <div class="metric">
+              <small>동작 일관성</small>
+              <strong>-</strong>
+            </div>
+
+            <div class="metric">
+              <small>케이던스</small>
+              <strong>-</strong>
+            </div>
+
+            <div class="metric">
+              <small>좌측 푸시오프</small>
+              <strong>-</strong>
+            </div>
+
+            <div class="metric">
+              <small>우측 푸시오프</small>
+              <strong>-</strong>
+            </div>
 
           </div>
 
 
-          <div class="trajectory">
+          <h3>
+            중심 궤적
+          </h3>
 
-            <h3>
-              중심 궤적
-            </h3>
+
+          <div
+            class="trajectory-box"
+          >
 
             <canvas
               id="rollerTrajectory"
@@ -577,7 +997,23 @@
 
           </div>
 
-        </div>
+
+          <h3>
+            관절각 변화
+          </h3>
+
+
+          <div
+            class="chart-box"
+          >
+
+            <canvas
+              id="rollerChart"
+            ></canvas>
+
+          </div>
+
+        </aside>
 
       </div>
 
@@ -586,7 +1022,7 @@
 
 
     <!-- ===================================================
-         SHOOTING
+         PAGE : SHOOTING
     ==================================================== -->
 
     <section
@@ -594,49 +1030,96 @@
       class="page"
     >
 
-      <div class="section-title">
 
-        <div>
+      <div
+        class="shooting-notice"
+      >
 
-          <span class="eyebrow">
-            SHOOTING
-          </span>
-
-          <h2>
-            사격 자세분석
-          </h2>
-
-        </div>
+        영상에서 선수의 자세와 움직임을 분석합니다.
+        실제 격발 여부는 자동으로 확정하지 않으며,
+        영상의 프레임을 사용자가 이벤트로 지정할 수 있습니다.
 
       </div>
 
 
-      <div class="notice">
-
-        영상에서 선수의 자세와 관절 움직임을
-        분석합니다.
-
-        총기·총구·격발 시점은 자동 판정하지 않습니다.
-
-      </div>
+      <div
+        class="analysis-layout"
+      >
 
 
-      <div class="workspace">
+        <div
+          class="analysis-main"
+        >
+
+          <div
+            class="analysis-title"
+          >
+
+            <div>
+
+              <span>
+                SHOOTING TECHNIQUE
+              </span>
+
+              <h2>
+                사격 자세분석
+              </h2>
+
+            </div>
 
 
-        <div class="video-panel">
+            <div
+              class="camera-selector"
+            >
 
-          <div class="video-wrap">
+              <button
+                class="camera-button active"
+                data-camera="side"
+              >
+                측면
+              </button>
+
+              <button
+                class="camera-button"
+                data-camera="front"
+              >
+                정면
+              </button>
+
+              <button
+                class="camera-button"
+                data-camera="rear"
+              >
+                후면
+              </button>
+
+            </div>
+
+          </div>
+
+
+          <div
+            class="video-box shooting-video"
+          >
 
             <video
               id="shootingVideo"
               playsinline
-              muted
+              preload="metadata"
             ></video>
+
 
             <canvas
               id="shootingCanvas"
             ></canvas>
+
+
+            <!-- 총구 궤적 오버레이 -->
+
+            <canvas
+              id="shootingMuzzleCanvas"
+            ></canvas>
+
 
             <div
               id="shootingEmpty"
@@ -648,27 +1131,49 @@
           </div>
 
 
-          <div class="controls">
+          <div
+            class="video-controls"
+          >
 
-            <button id="shootingPrev">
+            <button
+              id="shootingPrev"
+              class="control-button"
+            >
               ‹
             </button>
 
-            <button id="shootingPlay">
+
+            <button
+              id="shootingPlay"
+              class="control-button play"
+            >
               ▶
             </button>
 
-            <button id="shootingNext">
+
+            <button
+              id="shootingNext"
+              class="control-button"
+            >
               ›
             </button>
 
-            <button id="shootingSlow">
+
+            <button
+              id="shootingSlow"
+              class="speed-button"
+            >
               0.25×
             </button>
 
-            <button id="shootingNormal">
+
+            <button
+              id="shootingNormal"
+              class="speed-button"
+            >
               1×
             </button>
+
 
             <input
               id="shootingSeek"
@@ -681,41 +1186,121 @@
           </div>
 
 
-          <input
-            id="shootingInput"
-            type="file"
-            accept="video/*"
-            hidden
+          <div
+            class="action-row"
           >
 
+            <input
+              id="shootingInput"
+              type="file"
+              accept="video/*"
+              hidden
+            >
 
-          <button
-            id="shootingUpload"
-            class="primary"
+
+            <button
+              id="shootingUpload"
+              class="primary-button"
+            >
+              영상 선택
+            </button>
+
+
+            <button
+              id="shootingStart"
+              class="primary-button"
+            >
+              자세분석 시작
+            </button>
+
+
+            <button
+              id="shootingStop"
+              class="danger-button"
+            >
+              분석 종료 · 저장
+            </button>
+
+          </div>
+
+
+          <!-- 사격 전용 도구 -->
+
+          <div
+            class="shooting-tools"
           >
-            영상 선택
-          </button>
+
+            <button
+              id="markShot"
+              class="shooting-tool"
+            >
+              🎯 현재 프레임을 격발 이벤트로 지정
+            </button>
 
 
-          <button
-            id="shootingStart"
-            class="primary"
+            <button
+              id="markMuzzle"
+              class="shooting-tool"
+            >
+              ⊙ 현재 위치를 총구 기준점으로 지정
+            </button>
+
+
+            <button
+              id="clearShots"
+              class="shooting-tool"
+            >
+              초기화
+            </button>
+
+          </div>
+
+
+          <!-- 이벤트 -->
+
+          <div
+            class="event-panel"
           >
-            자세분석 시작
-          </button>
+
+            <div
+              class="panel-header"
+            >
+
+              <h3>
+                격발 이벤트
+              </h3>
+
+              <span
+                id="shotCount"
+              >
+                0 / 5
+              </span>
+
+            </div>
 
 
-          <button
-            id="shootingStop"
-            class="danger"
-          >
-            분석 종료·저장
-          </button>
+            <div
+              id="shotEvents"
+              class="shot-events"
+            >
+
+              <div class="empty">
+                지정된 이벤트가 없습니다.
+              </div>
+
+            </div>
+
+          </div>
 
         </div>
 
 
-        <div class="metric-panel">
+
+        <!-- SHOOTING SIDE -->
+
+        <aside
+          class="analysis-side"
+        >
 
           <h3>
             자세 지표
@@ -723,25 +1308,56 @@
 
 
           <div
-            class="metric-grid"
             id="shootingMetrics"
-          ></div>
+            class="metrics-grid"
+          >
 
+            <div class="metric">
+              <small>대칭성</small>
+              <strong>-</strong>
+            </div>
 
-          <div class="chart-box">
+            <div class="metric">
+              <small>중심 안정성</small>
+              <strong>-</strong>
+            </div>
 
-            <canvas
-              id="shootingChart"
-            ></canvas>
+            <div class="metric">
+              <small>동작 일관성</small>
+              <strong>-</strong>
+            </div>
+
+            <div class="metric">
+              <small>자세 유지</small>
+              <strong>-</strong>
+            </div>
 
           </div>
 
 
-          <div class="trajectory">
+          <h3>
+            총구 기준점
+          </h3>
 
-            <h3>
-              신체중심 궤적
-            </h3>
+
+          <div
+            class="muzzle-status"
+            id="muzzleStatus"
+          >
+
+            기준점이 지정되지 않았습니다.
+
+          </div>
+
+
+          <h3>
+            총구 이동 궤적
+          </h3>
+
+
+          <div
+            class="trajectory-box shooting-trajectory"
+          >
 
             <canvas
               id="shootingTrajectory"
@@ -749,7 +1365,39 @@
 
           </div>
 
-        </div>
+
+          <h3>
+            총구 X / Y 변화
+          </h3>
+
+
+          <div
+            class="chart-box"
+          >
+
+            <canvas
+              id="shootingMuzzleChart"
+            ></canvas>
+
+          </div>
+
+
+          <h3>
+            관절각 변화
+          </h3>
+
+
+          <div
+            class="chart-box"
+          >
+
+            <canvas
+              id="shootingChart"
+            ></canvas>
+
+          </div>
+
+        </aside>
 
       </div>
 
@@ -758,7 +1406,7 @@
 
 
     <!-- ===================================================
-         COMPARISON
+         PAGE : COMPARE
     ==================================================== -->
 
     <section
@@ -766,34 +1414,57 @@
       class="page"
     >
 
-      <div class="section-title">
+      <div
+        class="page-intro"
+      >
 
-        <div>
+        <span>
+          COMPARISON
+        </span>
 
-          <span class="eyebrow">
-            COMPARISON
-          </span>
+        <h2>
+          비교분석
+        </h2>
 
-          <h2>
-            비교분석
-          </h2>
-
-        </div>
+        <p>
+          두 분석 기록의 자세 지표와 움직임을 비교합니다.
+        </p>
 
       </div>
 
 
-      <div class="compare-controls">
+      <div
+        class="compare-selector"
+      >
 
-        <select id="compareA">
+        <select
+          id="compareA"
+        >
+          <option value="">
+            분석 기록 A
+          </option>
         </select>
 
-        <select id="compareB">
+
+        <div
+          class="compare-vs"
+        >
+          VS
+        </div>
+
+
+        <select
+          id="compareB"
+        >
+          <option value="">
+            분석 기록 B
+          </option>
         </select>
+
 
         <button
           id="runCompare"
-          class="primary"
+          class="primary-button"
         >
           비교하기
         </button>
@@ -803,7 +1474,7 @@
 
       <div
         id="compareEmpty"
-        class="empty"
+        class="empty-panel"
       >
         두 개의 분석 기록을 선택하세요.
       </div>
@@ -811,66 +1482,36 @@
 
       <div
         id="compareResult"
-        class="hidden"
+        class="compare-result hidden"
       >
 
-        <div class="compare-score">
+        <div
+          class="comparison-score"
+        >
 
           <div>
-
-            <small>
-              A 점수
-            </small>
-
-            <strong id="scoreA">
-              -
-            </strong>
-
+            <small>A 기록</small>
+            <strong id="scoreA">-</strong>
           </div>
 
 
           <div>
-
-            <small>
-              B 점수
-            </small>
-
-            <strong id="scoreB">
-              -
-            </strong>
-
+            <small>변화</small>
+            <strong id="scoreDiff">-</strong>
           </div>
 
 
           <div>
-
-            <small>
-              변화
-            </small>
-
-            <strong id="scoreDiff">
-              -
-            </strong>
-
+            <small>B 기록</small>
+            <strong id="scoreB">-</strong>
           </div>
 
         </div>
 
 
-        <div class="panel">
-
-          <h3>
-            지표 비교
-          </h3>
-
-          <div
-            id="compareBars"
-          ></div>
-
-        </div>
-
-
-        <div class="chart-box large">
+        <div
+          class="compare-chart-box"
+        >
 
           <canvas
             id="compareChart"
@@ -879,17 +1520,16 @@
         </div>
 
 
-        <div class="panel">
+        <div
+          id="compareBars"
+          class="compare-bars"
+        ></div>
 
-          <h3>
-            자동 비교 코멘트
-          </h3>
 
-          <div
-            id="compareComment"
-          ></div>
-
-        </div>
+        <div
+          id="compareComment"
+          class="feedback"
+        ></div>
 
       </div>
 
@@ -898,7 +1538,7 @@
 
 
     <!-- ===================================================
-         RECORDS
+         PAGE : RECORDS
     ==================================================== -->
 
     <section
@@ -906,34 +1546,40 @@
       class="page"
     >
 
-      <div class="section-title">
+      <div
+        class="page-intro"
+      >
 
-        <div>
+        <span>
+          DATA
+        </span>
 
-          <span class="eyebrow">
-            DATA
-          </span>
-
-          <h2>
-            분석 기록
-          </h2>
-
-        </div>
+        <h2>
+          분석 기록
+        </h2>
 
       </div>
 
 
       <div
         id="recordsList"
-        class="record-list"
-      ></div>
+        class="records-panel"
+      >
+
+        <div
+          class="empty"
+        >
+          아직 분석 기록이 없습니다.
+        </div>
+
+      </div>
 
     </section>
 
 
 
     <!-- ===================================================
-         REPORT
+         PAGE : REPORT
     ==================================================== -->
 
     <section
@@ -941,32 +1587,41 @@
       class="page"
     >
 
-      <div class="section-title">
+      <div
+        class="page-intro report-top"
+      >
 
         <div>
 
-          <span class="eyebrow">
+          <span>
             REPORT
           </span>
 
           <h2>
-            리포트
+            분석 리포트
           </h2>
 
         </div>
 
 
-        <div class="report-actions">
+        <div
+          class="report-actions"
+        >
 
           <select
             id="reportSelect"
-          ></select>
+          >
+            <option value="">
+              기록 선택
+            </option>
+          </select>
+
 
           <button
             id="printReport"
-            class="ghost"
+            class="primary-button"
           >
-            인쇄 / PDF
+            PDF / 인쇄
           </button>
 
         </div>
@@ -976,22 +1631,53 @@
 
       <div
         id="reportContainer"
-      ></div>
+      >
+
+        <div
+          class="empty-panel"
+        >
+          분석 기록을 선택하세요.
+        </div>
+
+      </div>
 
     </section>
+
 
   </main>
 
 </div>
 
 
+
+<!-- =======================================================
+     TOAST
+======================================================== -->
+
+<div
+  id="toast"
+></div>
+
+
+
 <!-- =======================================================
      JAVASCRIPT
 ======================================================== -->
 
-<script src="events.js"></script>
-<script src="app.js"></script>
-<script src="report.js"></script>
+<script
+  src="events.js"
+></script>
+
+
+<script
+  src="app.js"
+></script>
+
+
+<script
+  src="report.js"
+></script>
+
 
 </body>
 </html>
