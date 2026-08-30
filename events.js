@@ -2,1221 +2,778 @@
    설천 BIATHLON 자세분석 PRO
    events.js
    ---------------------------------------------------------
-   - 키보드 단축키
-   - 프레임 이동
-   - 격발 이벤트
-   - 총구 기준점 지정 모드
-   - 북마크
-   - 자세 캡처
-   - 분석 도구 연결
+   공통 이벤트 / 프레임 이동 / 배속 / 키보드 조작
 ========================================================= */
 
 "use strict";
 
 
 /* =========================================================
-   01. STATE
+   01. FRAME STEP
 ========================================================= */
 
-const EVENTS = {
-
-  muzzleSelectMode: false,
-
-  selectedType: null,
-
-  frameStep: {
-    normal: 1 / 30,
-    shooting: 1 / 60
-  },
-
-  shortcutsEnabled: true
-
-};
-
-
-/* =========================================================
-   02. HELPERS
-========================================================= */
-
-function eventVideo(type) {
-
-  return (
-    window.SeolcheonApp
-      ?.APP
-      ?.videos
-      ?. [type]
-  ) || null;
-
-}
-
-
-function eventToast(message) {
-
-  if (
-    typeof window.toast ===
-    "function"
-  ) {
-
-    window.toast(message);
-
-    return;
-
-  }
-
-
-  const toast =
-    document.querySelector(
-      "#toast"
-    );
-
-
-  if (!toast) return;
-
-
-  toast.textContent =
-    message;
-
-  toast.style.opacity =
-    "1";
-
-  toast.style.transform =
-    "translateY(0)";
-
-
-  setTimeout(
-    () => {
-
-      toast.style.opacity =
-        "0";
-
-      toast.style.transform =
-        "translateY(8px)";
-
-    },
-    2000
-  );
-
-}
-
-
-/* =========================================================
-   03. FRAME CONTROL
-========================================================= */
-
-function moveFrame(
-  type,
-  direction
-) {
-
-  const video =
-    eventVideo(type);
-
-
-  if (
-    !video ||
-    !video.src
-  ) {
-
-    eventToast(
-      "먼저 영상을 선택하세요."
-    );
-
-    return;
-
-  }
-
-
-  video.pause();
-
-
-  const step =
-    type === "shooting"
-      ? EVENTS.frameStep.shooting
-      : EVENTS.frameStep.normal;
-
-
-  video.currentTime =
-    Math.max(
-      0,
-      Math.min(
-        video.duration || Infinity,
-        video.currentTime +
-          step * direction
-      )
-    );
-
-
-  updateTimeUI(
-    type
-  );
-
-}
-
-
-function updateTimeUI(type) {
-
-  const video =
-    eventVideo(type);
-
-
-  if (!video) return;
-
-
-  const seek =
-    document.querySelector(
-      `#${type}Seek`
-    );
-
-
-  if (
-    seek &&
-    video.duration
-  ) {
-
-    seek.value =
-      (
-        video.currentTime /
-        video.duration
-      ) * 100;
-
-  }
-
-}
-
-
-/* =========================================================
-   04. EXACT FRAME
-========================================================= */
-
-function moveFrameFast(
-  type,
-  direction
-) {
-
-  const video =
-    eventVideo(type);
-
-
-  if (
-    !video ||
-    !video.src
-  ) {
-    return;
-  }
-
-
-  video.pause();
-
-
-  const step =
-    type === "shooting"
-      ? 1 / 15
-      : 1 / 10;
-
-
-  video.currentTime =
-    Math.max(
-      0,
-      Math.min(
-        video.duration || Infinity,
-        video.currentTime +
-          step * direction
-      )
-    );
-
-
-  updateTimeUI(
-    type
-  );
-
-}
-
-
-/* =========================================================
-   05. MUZZLE MODE
-========================================================= */
-
-function enableMuzzleSelection() {
-
-  EVENTS.muzzleSelectMode =
-    true;
-
-  EVENTS.selectedType =
-    "shooting";
-
-
-  const canvas =
-    document.querySelector(
-      "#shootingMuzzleCanvas"
-    );
-
-
-  if (canvas) {
-
-    canvas.style.pointerEvents =
-      "auto";
-
-    canvas.style.cursor =
-      "crosshair";
-
-  }
-
-
-  eventToast(
-    "영상에서 총구 위치를 눌러주세요."
-  );
-
-}
-
-
-function disableMuzzleSelection() {
-
-  EVENTS.muzzleSelectMode =
-    false;
-
-  EVENTS.selectedType =
-    null;
-
-
-  const canvas =
-    document.querySelector(
-      "#shootingMuzzleCanvas"
-    );
-
-
-  if (canvas) {
-
-    canvas.style.cursor =
-      "default";
-
-  }
-
-}
-
-
-/* =========================================================
-   06. MUZZLE CLICK
-========================================================= */
-
-function handleMuzzleClick(
-  event
-) {
-
-  if (
-    !EVENTS.muzzleSelectMode
-  ) {
-    return;
-  }
-
-
-  const canvas =
-    event.currentTarget;
-
-
-  const rect =
-    canvas.getBoundingClientRect();
-
-
-  if (
-    rect.width <= 0 ||
-    rect.height <= 0
-  ) {
-    return;
-  }
-
-
-  const x =
-    (
-      event.clientX -
-      rect.left
-    ) /
-    rect.width;
-
-
-  const y =
-    (
-      event.clientY -
-      rect.top
-    ) /
-    rect.height;
-
-
-  const app =
-    window.SeolcheonApp?.APP;
-
-
-  if (!app) return;
-
-
-  app.shooting.muzzlePoint = {
-
-    x: Math.max(
-      0,
-      Math.min(
-        1,
-        x
-      )
-    ),
-
-    y: Math.max(
-      0,
-      Math.min(
-        1,
-        y
-      )
-    )
-
-  };
-
-
-  EVENTS.muzzleSelectMode =
-    false;
-
-
-  canvas.style.cursor =
-    "default";
-
-
-  if (
-    typeof window.updateMuzzleStatus ===
-    "function"
-  ) {
-
-    window.updateMuzzleStatus();
-
-  }
-
-
-  if (
-    typeof window.drawMuzzleMarker ===
-    "function"
-  ) {
-
-    window.drawMuzzleMarker();
-
-  }
-
-
-  eventToast(
-    "총구 기준점을 지정했습니다."
-  );
-
-}
-
-
-/* =========================================================
-   07. SHOT EVENT
-========================================================= */
-
-function triggerShot() {
-
-  if (
-    typeof window.SeolcheonApp
-      ?.markShotEvent ===
-    "function"
-  ) {
-
-    window.SeolcheonApp
-      .markShotEvent();
-
-    return;
-
-  }
-
-
-  /*
-   * app.js가 직접 노출하지 않은 경우
-   * 내부 객체를 이용한다.
-   */
-
-  const app =
-    window.SeolcheonApp?.APP;
-
-
-  if (!app) return;
-
-
-  const video =
-    app.videos.shooting;
-
-
-  if (
-    !video ||
-    !video.src
-  ) {
-
-    eventToast(
-      "사격 영상을 먼저 선택하세요."
-    );
-
-    return;
-
-  }
-
-
-  if (
-    app.shooting.shotEvents.length >=
-    app.shooting.maxShots
-  ) {
-
-    eventToast(
-      "격발 이벤트는 최대 5개입니다."
-    );
-
-    return;
-
-  }
-
-
-  const id =
-    `shot-${Date.now()}-${Math.random()
-      .toString(36)
-      .slice(2)}`;
-
-
-  app.shooting.shotEvents.push({
-
-    id,
-
-    index:
-      app.shooting.shotEvents.length +
-      1,
-
-    time:
-      video.currentTime,
-
-    frame:
-      Math.round(
-        video.currentTime * 60
-      ),
-
-    confidence:
-      app.tracking.confidence,
-
-    createdAt:
-      new Date().toISOString()
-
-  });
-
-
-  app.shooting.shotEvents.sort(
-    (a, b) =>
-      a.time - b.time
-  );
-
-
-  app.shooting.shotEvents.forEach(
-    (item, index) => {
-
-      item.index =
-        index + 1;
-
-    }
-  );
-
-
-  if (
-    typeof window.renderShotEvents ===
-    "function"
-  ) {
-
-    window.renderShotEvents();
-
-  }
-
-
-  eventToast(
-    "격발 이벤트를 기록했습니다."
-  );
-
-}
-
-
-/* =========================================================
-   08. KEYBOARD SHORTCUTS
-========================================================= */
-
-function handleKeyboard(
-  event
-) {
-
-  if (
-    !EVENTS.shortcutsEnabled
-  ) {
-    return;
-  }
-
-
-  const target =
-    event.target;
-
-
-  /*
-   * 입력창에서는 단축키를
-   * 작동시키지 않는다.
-   */
-
-  if (
-    target &&
-    (
-      target.tagName ===
-        "INPUT" ||
-      target.tagName ===
-        "SELECT" ||
-      target.tagName ===
-        "TEXTAREA"
-    )
-  ) {
-
-    return;
-
-  }
-
-
-  const key =
-    event.key.toLowerCase();
-
-
-  const page =
-    window.SeolcheonApp
-      ?.APP
-      ?.currentPage;
-
-
-  let type =
-    null;
-
-
-  if (page === "ski") {
-
-    type = "ski";
-
-  }
-
-
-  if (page === "roller") {
-
-    type = "roller";
-
-  }
-
-
-  if (page === "shooting") {
-
-    type = "shooting";
-
-  }
-
-
-  /*
-   * Space
-   * 재생 / 일시정지
-   */
-
-  if (
-    event.code ===
-    "Space"
-  ) {
-
-    event.preventDefault();
-
-
-    if (!type) return;
-
+function stepFrame(type, direction) {
 
     const video =
-      eventVideo(type);
-
+        document.querySelector(`#${type}Video`);
 
     if (!video) return;
 
-
-    if (
-      video.paused
-    ) {
-
-      video.play();
-
-    } else {
-
-      video.pause();
-
-    }
-
-
-    return;
-
-  }
-
-
-  /*
-   * ← / →
-   * 한 프레임
-   */
-
-  if (
-    event.key ===
-    "ArrowLeft"
-  ) {
-
-    if (type) {
-
-      moveFrame(
-        type,
-        -1
-      );
-
-    }
-
-    return;
-
-  }
-
-
-  if (
-    event.key ===
-    "ArrowRight"
-  ) {
-
-    if (type) {
-
-      moveFrame(
-        type,
-        1
-      );
-
-    }
-
-    return;
-
-  }
-
-
-  /*
-   * Shift + ← / →
-   * 조금 크게 이동
-   */
-
-  if (
-    event.shiftKey &&
-    event.key ===
-      "ArrowLeft"
-  ) {
-
-    if (type) {
-
-      moveFrameFast(
-        type,
-        -1
-      );
-
-    }
-
-    return;
-
-  }
-
-
-  if (
-    event.shiftKey &&
-    event.key ===
-      "ArrowRight"
-  ) {
-
-    if (type) {
-
-      moveFrameFast(
-        type,
-        1
-      );
-
-    }
-
-    return;
-
-  }
-
-
-  /*
-   * S
-   * 사격 격발
-   */
-
-  if (
-    key === "s" &&
-    page === "shooting"
-  ) {
-
-    triggerShot();
-
-    return;
-
-  }
-
-
-  /*
-   * M
-   * 총구 지정
-   */
-
-  if (
-    key === "m" &&
-    page === "shooting"
-  ) {
-
-    enableMuzzleSelection();
-
-    return;
-
-  }
-
-
-  /*
-   * C
-   * 자세 캡처
-   */
-
-  if (
-    key === "c" &&
-    type
-  ) {
-
-    if (
-      typeof window.SeolcheonApp
-        ?.capturePose ===
-      "function"
-    ) {
-
-      window.SeolcheonApp
-        .capturePose(type);
-
-    }
-
-    return;
-
-  }
-
-
-  /*
-   * B
-   * 북마크
-   */
-
-  if (
-    key === "b" &&
-    type
-  ) {
-
-    if (
-      typeof window.SeolcheonApp
-        ?.bookmarkFrame ===
-      "function"
-    ) {
-
-      window.SeolcheonApp
-        .bookmarkFrame(type);
-
-    }
-
-    return;
-
-  }
-
-}
-
-
-/* =========================================================
-   09. DOUBLE CLICK = SHOT
-========================================================= */
-
-function setupShootingTimeline() {
-
-  const video =
-    document.querySelector(
-      "#shootingVideo"
-    );
-
-
-  if (!video) return;
-
-
-  video.addEventListener(
-    "dblclick",
-    event => {
-
-      /*
-       * 영상 자체를 더블클릭하면
-       * 격발 이벤트로 기록.
-       */
-
-      event.preventDefault();
-
-      triggerShot();
-
-    }
-  );
-
-}
-
-
-/* =========================================================
-   10. BUTTON BINDING
-========================================================= */
-
-function bindEventButtons() {
-
-  /*
-   * 프레임 버튼
-   */
-
-  document.addEventListener(
-    "click",
-    event => {
-
-      const target =
-        event.target.closest(
-          "[data-frame]"
-        );
-
-
-      if (!target) return;
-
-
-      const type =
-        target.dataset.type;
-
-
-      const direction =
-        Number(
-          target.dataset.frame
-        );
-
-
-      if (
-        type &&
-        Number.isFinite(
-          direction
-        )
-      ) {
-
-        moveFrame(
-          type,
-          direction
-        );
-
-      }
-
-    }
-  );
-
-
-  /*
-   * 총구 선택
-   */
-
-  document.addEventListener(
-    "click",
-    event => {
-
-      const target =
-        event.target.closest(
-          "[data-muzzle-select]"
-        );
-
-
-      if (!target) return;
-
-
-      enableMuzzleSelection();
-
-    }
-  );
-
-
-  /*
-   * 격발
-   */
-
-  document.addEventListener(
-    "click",
-    event => {
-
-      const target =
-        event.target.closest(
-          "[data-shot]"
-        );
-
-
-      if (!target) return;
-
-
-      triggerShot();
-
-    }
-  );
-
-
-  /*
-   * 초기화
-   */
-
-  document.addEventListener(
-    "click",
-    event => {
-
-      const target =
-        event.target.closest(
-          "[data-clear-shots]"
-        );
-
-
-      if (!target) return;
-
-
-      if (
-        typeof window.SeolcheonApp
-          ?.clearShotEvents ===
-        "function"
-      ) {
-
-        window.SeolcheonApp
-          .clearShotEvents();
-
-      }
-
-    }
-  );
-
-}
-
-
-/* =========================================================
-   11. MUZZLE CANVAS BINDING
-========================================================= */
-
-function bindMuzzleCanvas() {
-
-  const canvas =
-    document.querySelector(
-      "#shootingMuzzleCanvas"
-    );
-
-
-  if (!canvas) return;
-
-
-  canvas.addEventListener(
-    "click",
-    handleMuzzleClick
-  );
-
-}
-
-
-/* =========================================================
-   12. CAMERA CHANGE EVENTS
-========================================================= */
-
-function setupCameraEvents() {
-
-  document.addEventListener(
-    "click",
-    event => {
-
-      const button =
-        event.target.closest(
-          ".camera-button"
-        );
-
-
-      if (!button) return;
-
-
-      const camera =
-        button.dataset.camera;
-
-
-      if (!camera) return;
-
-
-      eventToast(
-        `카메라 방향: ${
-          camera === "side"
-            ? "측면"
-            : camera === "front"
-              ? "정면"
-              : "후면"
-        }`
-      );
-
-    }
-  );
-
-}
-
-
-/* =========================================================
-   13. VIDEO RATE
-========================================================= */
-
-function setupSpeedEvents() {
-
-  document.addEventListener(
-    "click",
-    event => {
-
-      const button =
-        event.target.closest(
-          "[data-speed]"
-        );
-
-
-      if (!button) return;
-
-
-      const type =
-        button.dataset.type;
-
-
-      const rate =
-        Number(
-          button.dataset.speed
-        );
-
-
-      const video =
-        eventVideo(type);
-
-
-      if (
-        !video ||
-        !Number.isFinite(rate)
-      ) {
+    if (!video.duration) {
+        toast("먼저 영상을 선택하세요.");
         return;
-      }
-
-
-      video.playbackRate =
-        rate;
-
-
-      eventToast(
-        `재생속도 ${rate}×`
-      );
-
     }
-  );
+
+    /*
+     * 기본 영상은 약 30fps를 기준으로
+     * 한 프레임씩 이동
+     */
+    const frameTime = 1 / 30;
+
+    video.pause();
+
+    video.currentTime =
+        Math.max(
+            0,
+            Math.min(
+                video.duration,
+                video.currentTime +
+                frameTime * direction
+            )
+        );
+
+    updatePlayButton(type);
 
 }
 
 
 /* =========================================================
-   14. TIMELINE UPDATE
+   02. PLAYBACK SPEED
 ========================================================= */
 
-function setupTimelineEvents() {
+function setPlaybackSpeed(type, speed) {
 
-  [
-    "ski",
-    "roller",
-    "shooting"
-  ].forEach(
-    type => {
+    const video =
+        document.querySelector(`#${type}Video`);
 
-      const video =
-        eventVideo(type);
+    if (!video) return;
+
+    video.playbackRate =
+        Number(speed);
+
+    /*
+     * 버튼 표시
+     */
+    document
+        .querySelectorAll(
+            `[data-speed][data-type="${type}"]`
+        )
+        .forEach(button => {
+
+            const active =
+                Number(button.dataset.speed) ===
+                Number(speed);
+
+            button.classList.toggle(
+                "active-speed",
+                active
+            );
+
+        });
+
+    toast(
+        `${speed}× 재생`
+    );
+
+}
 
 
-      if (!video) return;
+/* =========================================================
+   03. VIDEO TIME DISPLAY
+========================================================= */
+
+function formatVideoTime(seconds) {
+
+    if (
+        !Number.isFinite(seconds)
+    ) {
+        return "00:00.00";
+    }
+
+    const minutes =
+        Math.floor(
+            seconds / 60
+        );
+
+    const remain =
+        seconds % 60;
+
+    return (
+        String(minutes)
+            .padStart(2, "0")
+        +
+        ":"
+        +
+        remain
+            .toFixed(2)
+            .padStart(5, "0")
+    );
+
+}
 
 
-      video.addEventListener(
-        "timeupdate",
-        () => {
+/* =========================================================
+   04. VIDEO DURATION
+========================================================= */
 
-          updateTimeUI(
-            type
-          );
+function getVideoDuration(type) {
+
+    const video =
+        document.querySelector(
+            `#${type}Video`
+        );
+
+    if (
+        !video ||
+        !Number.isFinite(
+            video.duration
+        )
+    ) {
+
+        return 0;
+
+    }
+
+    return video.duration;
+
+}
+
+
+/* =========================================================
+   05. SET EXACT TIME
+========================================================= */
+
+function setVideoTime(
+    type,
+    time
+) {
+
+    const video =
+        document.querySelector(
+            `#${type}Video`
+        );
+
+    if (!video) return;
+
+    if (!video.duration) return;
+
+    video.currentTime =
+        Math.max(
+            0,
+            Math.min(
+                video.duration,
+                Number(time)
+            )
+        );
+
+}
+
+
+/* =========================================================
+   06. KEYBOARD CONTROL
+========================================================= */
+
+function setupKeyboardControls() {
+
+    document.addEventListener(
+        "keydown",
+        event => {
+
+            /*
+             * 입력창에 글자를 입력하는 중에는
+             * 영상 키보드 조작을 하지 않음
+             */
+
+            const tag =
+                event.target?.tagName;
+
+            if (
+                tag === "INPUT" ||
+                tag === "SELECT" ||
+                tag === "TEXTAREA"
+            ) {
+
+                return;
+
+            }
+
+
+            /*
+             * 현재 분석 페이지 확인
+             */
+
+            const page =
+                window.SeolcheonApp
+                    ?.APP
+                    ?.currentPage;
+
+
+            if (
+                ![
+                    "ski",
+                    "roller",
+                    "shooting"
+                ].includes(page)
+            ) {
+
+                return;
+
+            }
+
+
+            const video =
+                document.querySelector(
+                    `#${page}Video`
+                );
+
+
+            if (!video) return;
+
+
+            /*
+             * Space
+             * 재생 / 정지
+             */
+
+            if (
+                event.code ===
+                "Space"
+            ) {
+
+                event.preventDefault();
+
+                if (
+                    video.paused
+                ) {
+
+                    video.play();
+
+                } else {
+
+                    video.pause();
+
+                }
+
+                return;
+
+            }
+
+
+            /*
+             * ←
+             * 이전 프레임
+             */
+
+            if (
+                event.code ===
+                "ArrowLeft"
+            ) {
+
+                event.preventDefault();
+
+                stepFrame(
+                    page,
+                    -1
+                );
+
+                return;
+
+            }
+
+
+            /*
+             * →
+             * 다음 프레임
+             */
+
+            if (
+                event.code ===
+                "ArrowRight"
+            ) {
+
+                event.preventDefault();
+
+                stepFrame(
+                    page,
+                    1
+                );
+
+                return;
+
+            }
+
+
+            /*
+             * 숫자 1
+             * 0.25×
+             */
+
+            if (
+                event.key === "1"
+            ) {
+
+                setPlaybackSpeed(
+                    page,
+                    0.25
+                );
+
+                return;
+
+            }
+
+
+            /*
+             * 숫자 2
+             * 0.5×
+             */
+
+            if (
+                event.key === "2"
+            ) {
+
+                setPlaybackSpeed(
+                    page,
+                    0.5
+                );
+
+                return;
+
+            }
+
+
+            /*
+             * 숫자 3
+             * 1×
+             */
+
+            if (
+                event.key === "3"
+            ) {
+
+                setPlaybackSpeed(
+                    page,
+                    1
+                );
+
+            }
 
         }
-      );
-
-    }
-  );
+    );
 
 }
 
 
 /* =========================================================
-   15. INIT
+   07. FRAME BUTTON EVENTS
+========================================================= */
+
+function setupFrameButtons() {
+
+    document.addEventListener(
+        "click",
+        event => {
+
+            const button =
+                event.target.closest(
+                    "[data-frame]"
+                );
+
+            if (!button) return;
+
+            const type =
+                button.dataset.type;
+
+            const direction =
+                Number(
+                    button.dataset.frame
+                );
+
+            if (
+                !type ||
+                !Number.isFinite(
+                    direction
+                )
+            ) {
+
+                return;
+
+            }
+
+            stepFrame(
+                type,
+                direction
+            );
+
+        }
+    );
+
+}
+
+
+/* =========================================================
+   08. SPEED BUTTON EVENTS
+========================================================= */
+
+function setupSpeedButtons() {
+
+    document.addEventListener(
+        "click",
+        event => {
+
+            const button =
+                event.target.closest(
+                    "[data-speed]"
+                );
+
+            if (!button) return;
+
+            const type =
+                button.dataset.type;
+
+            const speed =
+                Number(
+                    button.dataset.speed
+                );
+
+            if (
+                !type ||
+                !Number.isFinite(
+                    speed
+                )
+            ) {
+
+                return;
+
+            }
+
+            setPlaybackSpeed(
+                type,
+                speed
+            );
+
+        }
+    );
+
+}
+
+
+/* =========================================================
+   09. VIDEO LOADED EVENTS
+========================================================= */
+
+function setupVideoMetadataEvents() {
+
+    [
+        "ski",
+        "roller",
+        "shooting"
+    ].forEach(
+        type => {
+
+            const video =
+                document.querySelector(
+                    `#${type}Video`
+                );
+
+            if (!video) return;
+
+
+            video.addEventListener(
+                "loadedmetadata",
+                () => {
+
+                    video.playbackRate =
+                        1;
+
+                    updateTimeline(
+                        type
+                    );
+
+                }
+            );
+
+        }
+    );
+
+}
+
+
+/* =========================================================
+   10. VIDEO ERROR
+========================================================= */
+
+function setupVideoErrorEvents() {
+
+    [
+        "ski",
+        "roller",
+        "shooting"
+    ].forEach(
+        type => {
+
+            const video =
+                document.querySelector(
+                    `#${type}Video`
+                );
+
+            if (!video) return;
+
+
+            video.addEventListener(
+                "error",
+                () => {
+
+                    toast(
+                        `${typeName(type)} 영상 파일을 읽을 수 없습니다.`
+                    );
+
+                }
+            );
+
+        }
+    );
+
+}
+
+
+/* =========================================================
+   11. VISIBILITY RESET
+========================================================= */
+
+function resetPoseWhenVideoChanged() {
+
+    [
+        "ski",
+        "roller",
+        "shooting"
+    ].forEach(
+        type => {
+
+            const video =
+                document.querySelector(
+                    `#${type}Video`
+                );
+
+            if (!video) return;
+
+
+            video.addEventListener(
+                "loadeddata",
+                () => {
+
+                    if (
+                        window.SeolcheonPose
+                    ) {
+
+                        window.SeolcheonPose
+                            .reset();
+
+                    }
+
+                }
+            );
+
+        }
+    );
+
+}
+
+
+/* =========================================================
+   12. PAGE CHANGE RESET
+========================================================= */
+
+function setupPageChangeProtection() {
+
+    document.addEventListener(
+        "click",
+        event => {
+
+            const button =
+                event.target.closest(
+                    ".nav-item"
+                );
+
+            if (!button) return;
+
+
+            /*
+             * 다른 분석으로 넘어가면
+             * 분석 상태는 초기화하지만
+             * 저장된 기록은 유지
+             */
+
+            const type =
+                button.dataset.page;
+
+
+            if (
+                [
+                    "ski",
+                    "roller",
+                    "shooting"
+                ].includes(type)
+            ) {
+
+                if (
+                    window.SeolcheonPose
+                ) {
+
+                    window.SeolcheonPose
+                        .setSport(
+                            type
+                        );
+
+                }
+
+            }
+
+        }
+    );
+
+}
+
+
+/* =========================================================
+   13. ANALYSIS SHORTCUTS
+========================================================= */
+
+function setupAnalysisShortcuts() {
+
+    document.addEventListener(
+        "keydown",
+        event => {
+
+            const page =
+                window.SeolcheonApp
+                    ?.APP
+                    ?.currentPage;
+
+
+            if (
+                page !== "shooting"
+            ) {
+
+                return;
+
+            }
+
+
+            /*
+             * S
+             * 자세 캡처
+             */
+
+            if (
+                event.key.toLowerCase()
+                === "s"
+            ) {
+
+                if (
+                    window.SeolcheonApp
+                        ?.capturePose
+                ) {
+
+                    window.SeolcheonApp
+                        .capturePose(
+                            "shooting"
+                        );
+
+                }
+
+            }
+
+        }
+    );
+
+}
+
+
+/* =========================================================
+   14. INITIALIZE EVENTS
 ========================================================= */
 
 function initializeEvents() {
 
-  bindEventButtons();
+    setupFrameButtons();
 
-  bindMuzzleCanvas();
+    setupSpeedButtons();
 
-  setupCameraEvents();
+    setupKeyboardControls();
 
-  setupSpeedEvents();
+    setupVideoMetadataEvents();
 
-  setupTimelineEvents();
+    setupVideoErrorEvents();
 
-  setupShootingTimeline();
+    resetPoseWhenVideoChanged();
 
+    setupPageChangeProtection();
 
-  document.addEventListener(
-    "keydown",
-    handleKeyboard
-  );
+    setupAnalysisShortcuts();
 
-
-  console.log(
-    "설천 events.js 연결 완료"
-  );
-
-}
-
-
-if (
-  document.readyState ===
-  "loading"
-) {
-
-  document.addEventListener(
-    "DOMContentLoaded",
-    initializeEvents
-  );
-
-} else {
-
-  initializeEvents();
+    console.log(
+        "설천 Events Ready"
+    );
 
 }
 
 
 /* =========================================================
-   16. PUBLIC API
+   15. PUBLIC API
 ========================================================= */
 
 window.SeolcheonEvents = {
 
-  moveFrame,
+    stepFrame,
 
-  moveFrameFast,
+    setPlaybackSpeed,
 
-  triggerShot,
+    setVideoTime,
 
-  enableMuzzleSelection,
+    formatVideoTime,
 
-  disableMuzzleSelection,
+    getVideoDuration,
 
-  handleMuzzleClick
+    initialize:
+        initializeEvents
 
 };
 
 
 /* =========================================================
-   END
+   16. START
+========================================================= */
+
+if (
+    document.readyState ===
+    "loading"
+) {
+
+    document.addEventListener(
+        "DOMContentLoaded",
+        initializeEvents,
+        {
+            once: true
+        }
+    );
+
+} else {
+
+    initializeEvents();
+
+}
+
+
+/* =========================================================
+   END OF events.js
 ========================================================= */
